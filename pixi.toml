@@ -1,88 +1,113 @@
 [project]
-authors = ["josiahls <jklaivins@gmail.com>"]
+authors = ["Josiah Laivins <jklaivins@gmail.com>"]
 channels = [
     "https://conda.modular.com/max-nightly", 
-    "https://conda.modular.com/max", 
     "https://repo.prefix.dev/modular-community", 
     "conda-forge"
 ]
-name = "c_binder_mojo"
+name = "cuda_learning_mojo"
 platforms = ["linux-64", "linux-aarch64"]
 version = "0.1.0"
+license = "Apache-2.0"
+license-file = "LICENSE"
+homepage = "https://github.com/josiahls/cuda_learning_mojo"
+repository = "https://github.com/josiahls/cuda_learning_mojo"
+
+[environments]
+stdlib-dev = {features = ["stdlib-dev"]}
 
 [dependencies]
-max = ">=25.5.0.dev2025073105"
+mojo = ">=0.25.7.0.dev2025101105,<0.26"
+pre-commit = ">=4.3.0,<5"
 
 [activation.env]
-LD_LIBRARY_PATH="$PIXI_PROJECT_ROOT/tests/test_c_project/build:$LD_LIBRARY_PATH"
-MODULAR_MOJO_MAX_IMPORT_PATH="$PIXI_PROJECT_ROOT/modular/bazel-bin"
+CUDA_LEARNING_INCLUDES = " -I ."
 
 [tasks]
-################## Test C Project Configuration ##################
-init_test_c_project = { cmd = [
-    "cd", "tests/test_c_project", "&&",
-    "mkdir", "-p", "build", "&&",
-    "cd", "build", "&&",
-    "cmake", ".."
-], outputs = ["tests/test_c_project/build"]}
+########################## Pre-commit Configuration ###########################
+install_pre_commit_hooks = { cmd = [
+    "pre-commit", "install"
+], outputs = [".git/hooks/pre-commit"]}
 
-build_test_c_project = { cmd = [
-        "cd", "tests/test_c_project/build", "&&",
-        "make",
-    ], depends-on = [
-        "init_test_c_project"
-    ],  outputs = [
-        "tests/test_c_project/build/libtest_c_project.so" 
-]}
-
-
-################## Firehose Configuration ##################
-clone_firehose = { cmd = [
+############################### Core API ######################################
+# NOTE: If we want to use the stdlib, we need to run the update_stdlib during configure to make dev work convenient.
+# pixi supports overriding the default task, but then the user gets prompted on which task they are to run every time.
+configure = { cmd = [
     "bash", "-c", 
-    "if [ ! -d firehose ]; then git clone https://github.com/josiahls/firehose.git; else echo 'Firehose directory already exists.'; fi"
+    "echo 'configuring' && if [ \"$PIXI_ENVIRONMENT_NAME\" = \"stdlib-dev\" ]; then echo 'Running in stdlib-dev environment, updating stdlib...'; pixi run update_stdlib; fi"
+], depends-on = [ "install_pre_commit_hooks" ] }
+
+package = { cmd = [
+    "mojo", "package", "$CUDA_LEARNING_INCLUDES", "cuda_learning_mojo",
+], depends-on = [ "configure" ]}
+
+format = { cmd = [
+    "mojo", "format", "cuda_learning_mojo"
 ]}
 
-################## Mojo Standard Library ##################
+build = { cmd = [
+    "mojo", "build", "$CUDA_LEARNING_INCLUDES", "-g1", "example_binding_gen.mojo"
+]}
+
+############################ Git Ops ##########################################
+push = "git push --force-with-lease"
+
+i_rebase = { cmd = [
+    "git", "rebase", "-i", "HEAD~{{ n_commits}}"
+], args = [{ arg = "n_commits", default = "1" }]}
+
+
+########################## Testing Configuration ##############################
+
+run_test = { cmd = [
+    "mojo", "run", "$CUDA_LEARNING_INCLUDES", "tests/test_c_project/mojo/test_{{ test_file_name }}.mojo"
+], depends-on = [ 
+    "configure",
+    "build"
+], args = [
+    { arg = "test_file_name" }
+]}
+
+run_test_debug = { cmd = [
+    "mojo", "debug", "$CUDA_LEARNING_INCLUDES", "tests/test_c_project/mojo/test_{{ test_file_name }}.mojo"
+], depends-on = [ 
+    "configure",
+    "build"
+], args = [
+    { arg = "test_file_name" }
+]}
+
+
+run_tests = { cmd = [
+    "bash", "./scripts/run-tests.sh"
+]}
+
+test_all = { depends-on = [ 
+    "package",
+    "run_tests"
+]}
+
+[feature.stdlib-dev.activation.env]
+MODULAR_MOJO_MAX_IMPORT_PATH="$PIXI_PROJECT_ROOT/modular/bazel-bin"
+# MOJO_ENABLE_STACK_TRACE_ON_ERROR="1"
+
+[feature.stdlib-dev.tasks]
+########################## Mojo Standard Library ##############################
+clone_stdlib = { cmd = [
+    "bash", "-c", 
+    "if [ ! -d modular ]; then git clone https://github.com/modular/modular.git; else echo 'Modular directory already exists.'; fi"
+]}
 
 update_stdlib = { cmd = [
     "cd", "modular", "&&",
-    "bazelw", "build", "//mojo/stdlib/stdlib"
-]}
+    "./bazelw", "build", "//mojo/stdlib/stdlib"
+], depends-on = [ "clone_stdlib" ]}
 
-################## Core API ##################
-
-configure = { cmd = [
-    "git", "submodule", "update", "--remote",
-], depends-on = [ "clone_firehose", "build_test_c_project" ] }
-
-generate_bindings = { cmd = [
-    "mojo", "run", "-I", ".", "-I", "firehose", "cli.mojo"
-], depends-on = [ "configure" ]}
-
-package = { cmd = [
-    "mojo", "package", "-I", "firehose", "c_binder_mojo"
-], depends-on = [ "configure" ]}
-
-
-################## Testing Configuration ##################
-# Build the c bindings.
-build_test_c_project_bindings = { cmd = [
-    "pixi", "run", "generate_bindings", 
-    "tests/test_c_project/include/simple_type_defs.h",
-    "tests/test_c_project/build",
-    "tests/test_c_project/build/libtest_c_project.so",
-], depends-on = [ "configure" ]}
-
-
-################## Testing ##################
-
-test_all = { cmd = [
-    "pixi", "run", "mojo", "run", "-I", "tests/test_c_project/build", "tests/test_c_project/mojo/test_simple_type_defs.mojo"
-], depends-on = [ "build_test_c_project_bindings", "update_stdlib" ]}
-
-
-
-
-
-
+clean_update_stdlib = { cmd = [
+    "cd", "modular", "&&",
+    "git", "switch", "main", "&&",
+    "git", "fetch", "origin", "&&",
+    "git", "reset", "--hard", "origin/main", "&&",
+    "./bazelw", "build", "//mojo/stdlib/..."
+], depends-on = [ "clone_stdlib" ]}
 
