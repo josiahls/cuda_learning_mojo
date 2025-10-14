@@ -1,0 +1,72 @@
+# version: "3.8"
+
+x-cuda_learning_mojo_base: &cuda_learning_mojo_base
+  working_dir: /home/mojo_user/cuda_learning_mojo
+  logging:
+    driver: json-file
+    options:
+      max-size: 50m
+  stdin_open: true
+  tty: true
+  shm_size: 16000000000
+  volumes:
+    - .:/home/mojo_user/cuda_learning_mojo/
+    - ~/.ssh:/home/mojo_user/.ssh:rw
+    - /tmp/.X11-unix:/tmp/.X11-unix:rw
+  environment:
+    DISPLAY: host.docker.internal:0
+
+volumes:
+  cuda_learning_mojo_vscode_data_cache:
+      external: false
+
+
+services:
+  cuda_learning_mojo_gpu_arm64: &cuda_learning_mojo_gpu_arm64
+    <<: *cuda_learning_mojo_base
+    restart: unless-stopped
+    # NOTE: Reusing the c_binder_mojo image 
+    image: josiahls/c_binder_mojo-arm64-gpu:${VERSION:-latest}
+    profiles: ["gpu_arm64"]
+    platform: linux/arm64
+    # depends_on:
+    #   - ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+  
+  cuda_learning_mojo_cpu_arm64: &cuda_learning_mojo_cpu_arm64
+    <<: *cuda_learning_mojo_base
+    profiles: ["cpu_arm64"]
+    restart: unless-stopped
+    platform: linux/arm64
+    # NOTE: Reusing the c_binder_mojo image 
+    image: josiahls/c_binder_mojo-arm64-cpu:${VERSION:-latest}
+
+
+  cuda_learning_mojo_gpu_x86_64: &cuda_learning_mojo_gpu_x86_64
+    <<: *cuda_learning_mojo_base
+    restart: unless-stopped
+    # NOTE: Reusing the c_binder_mojo image 
+    image: josiahls/c_binder_mojo-x86_64-gpu:${VERSION:-latest}
+    profiles: ["gpu_x86_64"]
+    platform: linux/amd64
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+  
+  cuda_learning_mojo_cpu_x86_64: &cuda_learning_mojo_cpu_x86_64
+    <<: *cuda_learning_mojo_base
+    profiles: ["cpu_x86_64"]
+    restart: unless-stopped
+    platform: linux/amd64
+    # NOTE: Reusing the c_binder_mojo image 
+    image: josiahls/c_binder_mojo-x86_64-cpu:${VERSION:-latest}

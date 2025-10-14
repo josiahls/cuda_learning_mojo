@@ -1,0 +1,88 @@
+[project]
+authors = ["josiahls <jklaivins@gmail.com>"]
+channels = [
+    "https://conda.modular.com/max-nightly", 
+    "https://conda.modular.com/max", 
+    "https://repo.prefix.dev/modular-community", 
+    "conda-forge"
+]
+name = "c_binder_mojo"
+platforms = ["linux-64", "linux-aarch64"]
+version = "0.1.0"
+
+[dependencies]
+max = ">=25.5.0.dev2025073105"
+
+[activation.env]
+LD_LIBRARY_PATH="$PIXI_PROJECT_ROOT/tests/test_c_project/build:$LD_LIBRARY_PATH"
+MODULAR_MOJO_MAX_IMPORT_PATH="$PIXI_PROJECT_ROOT/modular/bazel-bin"
+
+[tasks]
+################## Test C Project Configuration ##################
+init_test_c_project = { cmd = [
+    "cd", "tests/test_c_project", "&&",
+    "mkdir", "-p", "build", "&&",
+    "cd", "build", "&&",
+    "cmake", ".."
+], outputs = ["tests/test_c_project/build"]}
+
+build_test_c_project = { cmd = [
+        "cd", "tests/test_c_project/build", "&&",
+        "make",
+    ], depends-on = [
+        "init_test_c_project"
+    ],  outputs = [
+        "tests/test_c_project/build/libtest_c_project.so" 
+]}
+
+
+################## Firehose Configuration ##################
+clone_firehose = { cmd = [
+    "bash", "-c", 
+    "if [ ! -d firehose ]; then git clone https://github.com/josiahls/firehose.git; else echo 'Firehose directory already exists.'; fi"
+]}
+
+################## Mojo Standard Library ##################
+
+update_stdlib = { cmd = [
+    "cd", "modular", "&&",
+    "bazelw", "build", "//mojo/stdlib/stdlib"
+]}
+
+################## Core API ##################
+
+configure = { cmd = [
+    "git", "submodule", "update", "--remote",
+], depends-on = [ "clone_firehose", "build_test_c_project" ] }
+
+generate_bindings = { cmd = [
+    "mojo", "run", "-I", ".", "-I", "firehose", "cli.mojo"
+], depends-on = [ "configure" ]}
+
+package = { cmd = [
+    "mojo", "package", "-I", "firehose", "c_binder_mojo"
+], depends-on = [ "configure" ]}
+
+
+################## Testing Configuration ##################
+# Build the c bindings.
+build_test_c_project_bindings = { cmd = [
+    "pixi", "run", "generate_bindings", 
+    "tests/test_c_project/include/simple_type_defs.h",
+    "tests/test_c_project/build",
+    "tests/test_c_project/build/libtest_c_project.so",
+], depends-on = [ "configure" ]}
+
+
+################## Testing ##################
+
+test_all = { cmd = [
+    "pixi", "run", "mojo", "run", "-I", "tests/test_c_project/build", "tests/test_c_project/mojo/test_simple_type_defs.mojo"
+], depends-on = [ "build_test_c_project_bindings", "update_stdlib" ]}
+
+
+
+
+
+
+
