@@ -4,3 +4,5 @@
 *.egg-info
 # vscode / cursor
 .vscode/settings.json
+
+modular
