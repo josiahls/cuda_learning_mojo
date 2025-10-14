@@ -29,8 +29,6 @@ services:
     image: josiahls/c_binder_mojo-arm64-gpu:${VERSION:-latest}
     profiles: ["gpu_arm64"]
     platform: linux/arm64
-    # depends_on:
-    #   - ollama
     deploy:
       resources:
         reservations:
