@@ -6,7 +6,7 @@ channels = [
     "conda-forge"
 ]
 name = "cuda_learning_mojo"
-platforms = ["linux-64", "linux-aarch64"]
+platforms = ["linux-64", "linux-aarch64", "osx-arm64"]
 version = "0.1.0"
 license = "Apache-2.0"
 license-file = "LICENSE"
