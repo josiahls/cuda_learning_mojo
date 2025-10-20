@@ -1,7 +1,7 @@
 # version: "3.8"
 
 x-cuda_learning_mojo_base: &cuda_learning_mojo_base
-  working_dir: /home/mojo_user/cuda_learning_mojo_base
+  working_dir: /home/mojo_user/cuda_learning_mojo
   logging:
     driver: json-file
     options:
@@ -12,16 +12,16 @@ x-cuda_learning_mojo_base: &cuda_learning_mojo_base
   ports:
     - "5900:5900"
   volumes:
-    - .:/home/mojo_user/cuda_learning_mojo_base/
+    - .:/home/mojo_user/cuda_learning_mojo/
     - ~/.ssh:/home/mojo_user/.ssh:rw
-    - cuda_learning_mojo_base_vscode_data_cache:/home/mojo_user/.vscode-server/data/User/globalStorage:rw
+    - cuda_learning_mojo_vscode_data_cache:/home/mojo_user/.vscode-server/data/User/globalStorage:rw
     - /tmp/.X11-unix:/tmp/.X11-unix:rw
   environment:
     PIXI_ENVIRONMENT_NAME: ${PIXI_ENVIRONMENT_NAME:-default}
     DISPLAY: host.docker.internal:0
 
 volumes:
-  cuda_learning_mojo_base_vscode_data_cache:
+  cuda_learning_mojo_vscode_data_cache:
       external: false
 
 services:
