@@ -1,7 +1,7 @@
 # version: "3.8"
 
 x-cuda_learning_mojo_base: &cuda_learning_mojo_base
-  working_dir: /home/mojo_user/cuda_learning_mojo
+  working_dir: /home/mojo_user/cuda_learning_mojo_base
   logging:
     driver: json-file
     options:
@@ -9,50 +9,52 @@ x-cuda_learning_mojo_base: &cuda_learning_mojo_base
   stdin_open: true
   tty: true
   shm_size: 16000000000
+  ports:
+    - "5900:5900"
   volumes:
-    - .:/home/mojo_user/cuda_learning_mojo/
+    - .:/home/mojo_user/cuda_learning_mojo_base/
     - ~/.ssh:/home/mojo_user/.ssh:rw
+    - cuda_learning_mojo_base_vscode_data_cache:/home/mojo_user/.vscode-server/data/User/globalStorage:rw
     - /tmp/.X11-unix:/tmp/.X11-unix:rw
   environment:
+    PIXI_ENVIRONMENT_NAME: ${PIXI_ENVIRONMENT_NAME:-default}
     DISPLAY: host.docker.internal:0
 
 volumes:
-  cuda_learning_mojo_vscode_data_cache:
+  cuda_learning_mojo_base_vscode_data_cache:
       external: false
 
-
 services:
-  cuda_learning_mojo_gpu_arm64: &cuda_learning_mojo_gpu_arm64
+  cuda_learning_mojo_arm64_cpu: &cuda_learning_mojo_arm64_cpu
     <<: *cuda_learning_mojo_base
-    restart: unless-stopped
-    # NOTE: Reusing the c_binder_mojo image 
-    image: josiahls/c_binder_mojo-arm64-gpu:${VERSION:-latest}
-    profiles: ["gpu_arm64"]
-    platform: linux/arm64
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-  
-  cuda_learning_mojo_cpu_arm64: &cuda_learning_mojo_cpu_arm64
-    <<: *cuda_learning_mojo_base
-    profiles: ["cpu_arm64"]
+    profiles: ["arm64_cpu"]
     restart: unless-stopped
     platform: linux/arm64
-    # NOTE: Reusing the c_binder_mojo image 
     image: josiahls/c_binder_mojo-arm64-cpu:${VERSION:-latest}
 
+  cuda_learning_mojo_arm64_gpu: &cuda_learning_mojo_arm64_gpu
+    <<: *cuda_learning_mojo_arm64_cpu
+    profiles: ["arm64_gpu"]
+    image: josiahls/c_binder_mojo-arm64-gpu:${VERSION:-latest}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
-  cuda_learning_mojo_gpu_x86_64: &cuda_learning_mojo_gpu_x86_64
+  cuda_learning_mojo_x86_64_cpu: &cuda_learning_mojo_x86_64_cpu
     <<: *cuda_learning_mojo_base
+    profiles: ["x86_64_cpu"]
     restart: unless-stopped
-    # NOTE: Reusing the c_binder_mojo image 
-    image: josiahls/c_binder_mojo-x86_64-gpu:${VERSION:-latest}
-    profiles: ["gpu_x86_64"]
     platform: linux/amd64
+    image: josiahls/c_binder_mojo-x86_64-cpu:${VERSION:-latest}
+
+  cuda_learning_mojo_x86_64_gpu: &c_binder_mojo_x86_64_gpu
+    <<: *cuda_learning_mojo_x86_64_cpu
+    profiles: ["x86_64_gpu"]
+    image: josiahls/c_binder_mojo-x86_64-gpu:${VERSION:-latest}
     deploy:
       resources:
         reservations:
@@ -61,10 +63,4 @@ services:
               count: 1
               capabilities: [gpu]
   
-  cuda_learning_mojo_cpu_x86_64: &cuda_learning_mojo_cpu_x86_64
-    <<: *cuda_learning_mojo_base
-    profiles: ["cpu_x86_64"]
-    restart: unless-stopped
-    platform: linux/amd64
-    # NOTE: Reusing the c_binder_mojo image 
-    image: josiahls/c_binder_mojo-x86_64-cpu:${VERSION:-latest}
+
