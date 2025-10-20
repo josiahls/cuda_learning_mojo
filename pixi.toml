@@ -22,6 +22,7 @@ pre-commit = ">=4.3.0,<5"
 
 [activation.env]
 CUDA_LEARNING_INCLUDES = " -I ."
+GPU_ARCH = "sm_75"
 
 [tasks]
 ########################## Pre-commit Configuration ###########################
@@ -47,6 +48,33 @@ format = { cmd = [
 
 build = { cmd = [
     "mojo", "build", "$CUDA_LEARNING_INCLUDES", "-g1", "example_binding_gen.mojo"
+]}
+
+cuda = { cmd = [
+    "mkdir", "-p", "build/{{ cuda_file_dir }}",
+    "&&",
+    "nvcc",
+    "-arch", "$GPU_ARCH", 
+    "-o", "build/{{ cuda_file_dir }}/{{ cuda_file_name }}",
+    "{{ cuda_file_dir }}/{{ cuda_file_name }}.cu", 
+    "&&",
+    "build/{{ cuda_file_dir }}/{{ cuda_file_name }}"
+], args = [
+    { arg = "cuda_file_dir" },
+    { arg = "cuda_file_name" },
+]}
+
+c = { cmd = [
+    "mkdir", "-p", "build/{{ c_file_dir }}",
+    "&&",
+    "nvcc",
+    "-o", "build/{{ c_file_dir }}/{{ c_file_name }}_c",
+    "{{ c_file_dir }}/{{ c_file_name }}.c", 
+    "&&",
+    "build/{{ c_file_dir }}/{{ c_file_name }}_c"
+], args = [
+    { arg = "c_file_dir" },
+    { arg = "c_file_name" },
 ]}
 
 ############################ Git Ops ##########################################
