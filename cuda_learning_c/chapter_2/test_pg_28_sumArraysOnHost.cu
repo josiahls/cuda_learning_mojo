@@ -25,8 +25,10 @@ void sumArraysOnHost(float *A, float *B, float *C, const int N) {
 
 __global__ void sumArraysOnGPU(float *A, float *B, float *C, const int N)
 {
-    int i = threadIdx.x;
-
+    // NOTE: Doing this will only work if there is only 1 block!
+    // int i = threadIdx.x;
+    // NOTE: This scales to multiple blocks!
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < N) C[i] = A[i] + B[i];
 }
 
@@ -48,6 +50,7 @@ int main() {
     float *h_A = (float *)malloc(nBytes);
     float *h_B = (float *)malloc(nBytes);
     float *h_C = (float *)malloc(nBytes);
+    float *h_C_check = (float *)malloc(nBytes);
     initialData(h_A, nElem);
     initialData(h_B, nElem);
 
@@ -63,14 +66,22 @@ int main() {
     cudaMemcpy(d_A, h_A, nBytes, cudaMemcpyHostToDevice);
     cudaMemcpy(d_B, h_B, nBytes, cudaMemcpyHostToDevice);
 
+    // dim3 block(nElem);
+    // dim3 grid(nElem / block.x);
+    dim3 block(1);
+    dim3 grid(nElem);
+
     // sumArraysOnHost(h_A, h_B, h_C, nElem);
-    sumArraysOnGPU<<<1, nElem>>>(d_A, d_B, d_C, nElem);
+    sumArraysOnGPU<<<grid, block>>>(d_A, d_B, d_C, nElem);
+
+    // Sum the host data to check the result
+    sumArraysOnHost(h_A, h_B, h_C_check, nElem);
 
     // Note cudaMemCpy is always device, host
     CHECK(cudaMemcpy(h_C, d_C,  nBytes, cudaMemcpyDeviceToHost));
 
     for (int i = 0; i < nElem; i++) {
-        printf("%f + %f = %f\n", h_A[i], h_B[i], h_C[i]);
+        printf("%f + %f = %f vs %f\n", h_A[i], h_B[i], h_C[i], h_C_check[i]);
     }
 
     cudaFree(d_A);
