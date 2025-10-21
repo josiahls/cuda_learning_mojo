@@ -1,7 +1,20 @@
+#include <cuda_runtime.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <stdio.h>
+
+// From pg 40
+#define CHECK(call) \
+{ \
+	const cudaError_t error = call; \
+	if (error != cudaSuccess) \
+	{ \
+		printf("Error: %s:%d, ", __FILE__, __LINE__); \
+		printf("cuda:%d, reason: %s\n", error, cudaGetErrorString(error)); \
+		exit(1); \
+	} \
+}
 
 void sumArraysOnHost(float *A, float *B, float *C, const int N) {
     for (int idx = 0; idx < N; idx++) {
@@ -54,7 +67,7 @@ int main() {
     sumArraysOnGPU<<<1, nElem>>>(d_A, d_B, d_C, nElem);
 
     // Note cudaMemCpy is always device, host
-    cudaMemcpy(h_C, d_C,  nBytes, cudaMemcpyDeviceToHost);
+    CHECK(cudaMemcpy(h_C, d_C,  nBytes, cudaMemcpyDeviceToHost));
 
     for (int i = 0; i < nElem; i++) {
         printf("%f + %f = %f\n", h_A[i], h_B[i], h_C[i]);
