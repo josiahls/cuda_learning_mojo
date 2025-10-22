@@ -2,7 +2,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/time.h>
 #include <stdio.h>
+
+double cpuSecond() {
+	struct timeval tp;
+	gettimeofday(&tp, NULL);
+	return ((double)tp.tv_sec + (double)tp.tv_usec * 1.e-6);
+}
 
 // From pg 40
 #define CHECK(call) \
@@ -43,7 +50,7 @@ void initialData(float *ip, int size) {
 }
 
 int main() {
-    int nElem = 1024;
+    int nElem = 1024 * 1024 * 128;
     size_t nBytes = nElem * sizeof(float);
 
     // Initialize the host values and assign the starting data to them.
@@ -66,22 +73,41 @@ int main() {
     cudaMemcpy(d_A, h_A, nBytes, cudaMemcpyHostToDevice);
     cudaMemcpy(d_B, h_B, nBytes, cudaMemcpyHostToDevice);
 
-    // dim3 block(nElem);
+    // dim3 block(nElem / 2);
     // dim3 grid(nElem / block.x);
-    dim3 block(1);
-    dim3 grid(nElem);
-
-    // sumArraysOnHost(h_A, h_B, h_C, nElem);
-    sumArraysOnGPU<<<grid, block>>>(d_A, d_B, d_C, nElem);
+    dim3 block(1024);
+    dim3 grid(nElem / 1024);
 
     // Sum the host data to check the result
+    double iStart = cpuSecond();
     sumArraysOnHost(h_A, h_B, h_C_check, nElem);
+    double iElaps = cpuSecond() - iStart;
+    printf("sumArraysOnHost: %f sec\n", iElaps);
+
+    iStart = cpuSecond();
+    // sumArraysOnHost(h_A, h_B, h_C, nElem);
+    sumArraysOnGPU<<<grid, block>>>(d_A, d_B, d_C, nElem);
+    CHECK(cudaDeviceSynchronize());
+    iElaps = cpuSecond() - iStart;
+    printf("sumArraysOnGPU <<<%d, %d>>>: %f sec\n", grid.x, block.x, iElaps);
+
+
 
     // Note cudaMemCpy is always device, host
     CHECK(cudaMemcpy(h_C, d_C,  nBytes, cudaMemcpyDeviceToHost));
 
+    bool match = true;
     for (int i = 0; i < nElem; i++) {
-        printf("%f + %f = %f vs %f\n", h_A[i], h_B[i], h_C[i], h_C_check[i]);
+        if (abs(h_C[i] - h_C_check[i]) > 1e-5) {
+            printf("Error at index %d: %f != %f\n", i, h_C[i], h_C_check[i]);
+            match = false;
+            break;
+        }
+    }
+    if (match) {
+        printf("Test passed\n");
+    } else {
+        printf("Test failed\n");
     }
 
     cudaFree(d_A);
