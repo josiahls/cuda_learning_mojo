@@ -36,7 +36,7 @@ fn main() raises:
     print("block.x", block.x(), "block.y", block.y(), "block.z", block.z())
 
     # Initialize the device values
-    with DeviceContext() as ctx:
+    with DeviceContext(0) as ctx:
         ctx.enqueue_function[check_index](
             grid_dim=grid, 
             block_dim=block
