@@ -17,7 +17,7 @@ repository = "https://github.com/josiahls/cuda_learning_mojo"
 stdlib-dev = {features = ["stdlib-dev"]}
 
 [dependencies]
-mojo = ">=0.25.7.0.dev2025101805,<0.26"
+mojo = ">=0.25.7.0.dev20251012305,<0.26"
 pre-commit = ">=4.3.0,<5"
 
 [activation.env]
