@@ -3,8 +3,44 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
 
+
+void printMultiProcessorCount() {
+    int dev = 0;
+    cudaDeviceProp deviceProp;
+    cudaGetDeviceProperties(&deviceProp, dev);
+    printf(
+        "Number of streaming multiprocessors: %d\n",
+        deviceProp.multiProcessorCount
+    );
+}
+
+
+void determineBestGPU() {
+    int numDevices = 0;
+    cudaGetDeviceCount(&numDevices);
+    if (numDevices > 1) {
+        int maxMultiprocessors = 0, maxDevice = 0;
+        for (int device=0; device<numDevices; device++) {
+            cudaDeviceProp props;
+            cudaGetDeviceProperties(&props, device);
+            if (maxMultiprocessors < props.multiProcessorCount) {
+                maxMultiprocessors = props.multiProcessorCount;
+                maxDevice = device;
+            }
+
+        }
+        printf("Selecting gpu: %d", maxDevice);
+        cudaSetDevice(maxDevice);
+    }
+}
+
+
 int main(int argc, char **argv) {
     printf("%s, Starting...\n", argv[0]);
+
+    printMultiProcessorCount();
+
+    determineBestGPU();
 
     int deviceCount = 0;
     cudaError_t error_id = cudaGetDeviceCount(&deviceCount);
