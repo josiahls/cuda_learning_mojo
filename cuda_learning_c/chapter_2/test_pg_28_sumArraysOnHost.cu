@@ -76,7 +76,7 @@ int main() {
     // dim3 block(nElem / 2);
     // dim3 grid(nElem / block.x);
     printf("Vector size: %d\n", nElem);
-    dim3 block(1023);
+    dim3 block(1024);
     dim3 grid((nElem + block.x - 1) / block.x);
 
     // Sum the host data to check the result
