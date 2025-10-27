@@ -50,7 +50,7 @@ void initialData(float *ip, int size) {
 }
 
 int main() {
-    int nElem = 1024 * 1024 * 128;
+    int nElem = 1 << 24;
     size_t nBytes = nElem * sizeof(float);
 
     // Initialize the host values and assign the starting data to them.
@@ -75,8 +75,9 @@ int main() {
 
     // dim3 block(nElem / 2);
     // dim3 grid(nElem / block.x);
-    dim3 block(1024);
-    dim3 grid(nElem / 1024);
+    printf("Vector size: %d\n", nElem);
+    dim3 block(1023);
+    dim3 grid((nElem + block.x - 1) / block.x);
 
     // Sum the host data to check the result
     double iStart = cpuSecond();
