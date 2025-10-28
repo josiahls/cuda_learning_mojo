@@ -1,4 +1,4 @@
-[project]
+[workspace]
 authors = ["Josiah Laivins <jklaivins@gmail.com>"]
 channels = [
     "https://conda.modular.com/max-nightly", 
