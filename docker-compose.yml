@@ -36,6 +36,9 @@ services:
     <<: *cuda_learning_mojo_arm64_cpu
     profiles: ["arm64_gpu"]
     image: josiahls/c_binder_mojo-arm64-gpu:${VERSION:-latest}
+    # SYS_ADMIN capability needed to access NVIDIA GPU Performance Counters for profiling (ncu, nsys, etc.)
+    cap_add:
+      - SYS_ADMIN
     deploy:
       resources:
         reservations:
@@ -55,6 +58,9 @@ services:
     <<: *cuda_learning_mojo_x86_64_cpu
     profiles: ["x86_64_gpu"]
     image: josiahls/c_binder_mojo-x86_64-gpu:${VERSION:-latest}
+    # SYS_ADMIN capability needed to access NVIDIA GPU Performance Counters for profiling (ncu, nsys, etc.)
+    cap_add:
+      - SYS_ADMIN
     deploy:
       resources:
         reservations:
