@@ -120,6 +120,14 @@ __global__ void mathKernel3(float *c) {
 
 
 int main(int argc, char **argv) {
+
+  /**
+  Evaluated via:
+
+  pixi run cudad cuda_learning_c/chapter_3 pg_84_simpleDivergence
+  ncu -f --metrics smsp__sass_branch_targets_threads_divergent.avg,smsp__sass_branch_targets_threads_divergent.sum build/cuda_learning_c/chapter_3/pg_84_simpleDivergence 
+  
+  */
   const int dev = 0;
   cudaDeviceProp deviceProp;
   CHECK(cudaGetDeviceProperties(&deviceProp, dev));
@@ -166,8 +174,6 @@ int main(int argc, char **argv) {
 
   cudaFree(d_C);
   cudaDeviceReset();
-
-
 
   return 0;
 }

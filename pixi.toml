@@ -64,11 +64,12 @@ cuda = { cmd = [
     { arg = "cuda_file_name" },
 ]}
 
-cudaO3 = { cmd = [
+cudad = { cmd = [
     "mkdir", "-p", "build/{{ cuda_file_dir }}",
     "&&",
     "nvcc",
-    "-O3",
+    # "-O3",
+    "-g", "-G",
     "-arch", "$GPU_ARCH", 
     "-o", "build/{{ cuda_file_dir }}/{{ cuda_file_name }}",
     "{{ cuda_file_dir }}/{{ cuda_file_name }}.cu", 
