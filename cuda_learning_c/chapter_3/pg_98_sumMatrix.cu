@@ -58,8 +58,8 @@ void checkResult(float *h_C, float *h_GpuCheck, int nElem) {
 }
 
 inline void printElaps(double &iStart,double &iElaps, const char * function_name, const dim3 &grid, const dim3 &block) {
-  iElaps = cpuSecond() - iStart;
-  printf("%s <<< %4d, %4d >>> elapsed %f sec \n", function_name, grid.x, block.x, iElaps);
+  iElaps = (cpuSecond() - iStart) * 1000;
+  printf("%s <<< %4d, %4d >>> elapsed %f ms \n", function_name, grid.x, block.x, iElaps);
 }
 
 //===---------------------------BOILER PLATE--------------------------------====
@@ -86,8 +86,31 @@ int main(int argc, char **argv) {
   /**
   Evaluated via:
 
-  pixi run cudad cuda_learning_c/chapter_3 pg_84_simpleDivergence
-  ncu -f --metrics smsp__sass_branch_targets_threads_divergent.avg,smsp__sass_branch_targets_threads_divergent.sum build/cuda_learning_c/chapter_3/pg_84_simpleDivergence 
+  ncu --metric sm__warps_active.avg.pct_of_peak_sustained_active build/cuda_learning_c/chapter_3/pg_98_sumMatrix 32 32
+  ncu --metric sm__warps_active.avg.pct_of_peak_sustained_active build/cuda_learning_c/chapter_3/pg_98_sumMatrix 32 16
+  ncu --metric sm__warps_active.avg.pct_of_peak_sustained_active build/cuda_learning_c/chapter_3/pg_98_sumMatrix 16 32
+  ncu --metric sm__warps_active.avg.pct_of_peak_sustained_active build/cuda_learning_c/chapter_3/pg_98_sumMatrix 16 16
+
+  ncu --metric 	l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second build/cuda_learning_c/chapter_3/pg_98_sumMatrix 32 32
+  ncu --metric 	l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second build/cuda_learning_c/chapter_3/pg_98_sumMatrix 32 16
+  ncu --metric 	l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second build/cuda_learning_c/chapter_3/pg_98_sumMatrix 16 32
+  ncu --metric 	l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second build/cuda_learning_c/chapter_3/pg_98_sumMatrix 16 16
+
+
+  ncu --metric 	l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum build/cuda_learning_c/chapter_3/pg_98_sumMatrix 32 32
+  ncu --metric 	l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum build/cuda_learning_c/chapter_3/pg_98_sumMatrix 32 16
+  ncu --metric 	l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum build/cuda_learning_c/chapter_3/pg_98_sumMatrix 16 32
+  ncu --metric 	l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum build/cuda_learning_c/chapter_3/pg_98_sumMatrix 16 16
+
+  build/cuda_learning_c/chapter_3/pg_98_sumMatrix 64 2
+  build/cuda_learning_c/chapter_3/pg_98_sumMatrix 64 4
+  build/cuda_learning_c/chapter_3/pg_98_sumMatrix 64 8
+  build/cuda_learning_c/chapter_3/pg_98_sumMatrix 128 2
+  build/cuda_learning_c/chapter_3/pg_98_sumMatrix 128 4
+  build/cuda_learning_c/chapter_3/pg_98_sumMatrix 128 8
+  build/cuda_learning_c/chapter_3/pg_98_sumMatrix 256 2
+  build/cuda_learning_c/chapter_3/pg_98_sumMatrix 256 4
+  build/cuda_learning_c/chapter_3/pg_98_sumMatrix 256 8
   
   */
   const int dev = 0;
@@ -103,15 +126,21 @@ int main(int argc, char **argv) {
 
   int dimx = 16;
   int dimy = 16;
+  // 16x16 -> 13.2 ms -O3 -> 13.32 ms
+  // 32x32 -> 13.4 ms -O3 -> 13.41 ms
+  // 16x32 -> 13.39 ms -O3 -> 13.38 ms
+  // 32x16 -> 13.23 ms -O3 -> 13.29 ms
+
+
 
   if (argc > 1) dimx = atoi(argv[1]);
   if (argc > 2) dimy = atoi(argv[2]);
   printf("Data size x: %d y: %d\n", dimx, dimy);
 
   dim3 block (dimx, dimy);
-  dim3 grid((nx + block.x - 1) / block.x, (ny + block.y) / block.y);
+  dim3 grid((nx + block.x - 1) / block.x, (ny + block.y - 1) / block.y);
 
-  printf("Execution Configure (block %d, grid %d)\n", block.x, grid.x);
+  printf("Execution Configure (block %d %d, grid %d %d)\n", block.x, block.y, grid.x, grid.y);
 
   float *h_A, *h_B, *h_C, *h_check_C;
 
@@ -137,7 +166,7 @@ int main(int argc, char **argv) {
   double iStart, iElips;
   iStart = cpuSecond();
   sumMatrix2D<<< grid, block>>> (d_A, d_B, d_C, nx, ny);
-  cudaDeviceSynchronize();
+  CHECK(cudaDeviceSynchronize());
   printElaps(iStart,iElips, "sumMatrix2D", grid, block);
 
   cudaMemcpy(h_C, d_C, NBytes, cudaMemcpyDeviceToHost);
