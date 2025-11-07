@@ -63,6 +63,12 @@ inline void printElaps(double &iStart,double &iElaps, const char * function_name
 
 //===---------------------------BOILER PLATE--------------------------------====
 
+void hostAccumulateToIndex0(int *ip, int grid_x) {
+  for (int i = 1; i < grid_x; i++) {
+    ip[0] += ip[i];
+  }
+}
+
 void hostReduceNeighbored(int *g_idata, int *g_odata, int n) {
   int num = 0;
   for (int idx = 0; idx < n; idx++) {
@@ -165,39 +171,31 @@ __global__ void reduceNeighboredInterleaved(int *g_idata, int *g_odata, int n) {
 }
 
 
+__global__ void reduceUnrolling2(int *g_idata, int *g_odata, int n) {
+  unsigned int tid = threadIdx.x;
+  // We are accessing 2 blocks per thread
+  unsigned int idx = blockIdx.x * blockDim.x * 2 + threadIdx.x;
+  int *idata = g_idata + blockIdx.x * blockDim.x * 2;
+
+  if (idx + blockDim.x < n) {
+    g_idata[idx] += g_idata[idx + blockDim.x];
+    __syncthreads();
+  } 
+
+  for (int stride=blockDim.x / 2; stride  > 0; stride >>= 1) {
+    if (tid < stride) {
+      idata[tid] += idata[tid + stride];
+    }
+
+    __syncthreads();
+  }
+
+  if (tid == 0) g_odata[blockIdx.x] = idata[0];
+}
+
+
 
 int main(int argc, char **argv) {
-
-  /**
-  Evaluated via:
-
-  ncu --metric sm__warps_active.avg.pct_of_peak_sustained_active build/cuda_learning_c/chapter_3/pg_98_sumMatrix 32 32
-  ncu --metric sm__warps_active.avg.pct_of_peak_sustained_active build/cuda_learning_c/chapter_3/pg_98_sumMatrix 32 16
-  ncu --metric sm__warps_active.avg.pct_of_peak_sustained_active build/cuda_learning_c/chapter_3/pg_98_sumMatrix 16 32
-  ncu --metric sm__warps_active.avg.pct_of_peak_sustained_active build/cuda_learning_c/chapter_3/pg_98_sumMatrix 16 16
-
-  ncu --metric 	l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second build/cuda_learning_c/chapter_3/pg_98_sumMatrix 32 32
-  ncu --metric 	l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second build/cuda_learning_c/chapter_3/pg_98_sumMatrix 32 16
-  ncu --metric 	l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second build/cuda_learning_c/chapter_3/pg_98_sumMatrix 16 32
-  ncu --metric 	l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second build/cuda_learning_c/chapter_3/pg_98_sumMatrix 16 16
-
-
-  ncu --metric 	l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum build/cuda_learning_c/chapter_3/pg_98_sumMatrix 32 32
-  ncu --metric 	l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum build/cuda_learning_c/chapter_3/pg_98_sumMatrix 32 16
-  ncu --metric 	l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum build/cuda_learning_c/chapter_3/pg_98_sumMatrix 16 32
-  ncu --metric 	l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum build/cuda_learning_c/chapter_3/pg_98_sumMatrix 16 16
-
-  build/cuda_learning_c/chapter_3/pg_98_sumMatrix 64 2
-  build/cuda_learning_c/chapter_3/pg_98_sumMatrix 64 4
-  build/cuda_learning_c/chapter_3/pg_98_sumMatrix 64 8
-  build/cuda_learning_c/chapter_3/pg_98_sumMatrix 128 2
-  build/cuda_learning_c/chapter_3/pg_98_sumMatrix 128 4
-  build/cuda_learning_c/chapter_3/pg_98_sumMatrix 128 8
-  build/cuda_learning_c/chapter_3/pg_98_sumMatrix 256 2
-  build/cuda_learning_c/chapter_3/pg_98_sumMatrix 256 4
-  build/cuda_learning_c/chapter_3/pg_98_sumMatrix 256 8
-  
-  */
   const int dev = 0;
   cudaDeviceProp deviceProp;
   CHECK(cudaGetDeviceProperties(&deviceProp, dev));
@@ -226,18 +224,15 @@ int main(int argc, char **argv) {
 
   initialData(h_idata, nx);
 
-  int *d_idata_1,*d_idata_2,*d_idata_3, *d_odata_1, *d_odata_2,*d_odata_3;
+  int *d_idata_1,*d_idata_2, *d_odata_1, *d_odata_2;
 
   cudaMalloc((int**)&d_idata_1, NBytes);
   cudaMalloc((int**)&d_idata_2, NBytes);
-  cudaMalloc((int**)&d_idata_3, NBytes);
   cudaMalloc((int**)&d_odata_1, output_size);
   cudaMalloc((int**)&d_odata_2, output_size);
-  cudaMalloc((int**)&d_odata_3, output_size);
 
   cudaMemcpy(d_idata_1, h_idata, NBytes, cudaMemcpyHostToDevice);
   cudaMemcpy(d_idata_2, h_idata, NBytes, cudaMemcpyHostToDevice);
-  cudaMemcpy(d_idata_3, h_idata, NBytes, cudaMemcpyHostToDevice);
 
   double iStart, iElips;
   iStart = cpuSecond();
@@ -253,20 +248,37 @@ int main(int argc, char **argv) {
   reduceNeighboredLess<<< grid, block>>> (d_idata_2, d_odata_2, nx);
   CHECK(cudaDeviceSynchronize());
   printElaps(iStart,iElips, "reduceNeighboredLess", grid, block);
+  cudaMemcpy(h_odata, d_odata_2, output_size, cudaMemcpyDeviceToHost);
+  hostAccumulateToIndex0(h_odata, grid.x);
+  checkResult(h_check_odata, h_odata, nx);
 
+
+  int *d_idata_3,*d_odata_3;
+  cudaMalloc((int**)&d_idata_3, NBytes);
+  cudaMalloc((int**)&d_odata_3, output_size);
+  cudaMemcpy(d_idata_3, h_idata, NBytes, cudaMemcpyHostToDevice);
   iStart = cpuSecond();
   reduceNeighboredInterleaved<<< grid, block>>> (d_idata_3, d_odata_3, nx);
   CHECK(cudaDeviceSynchronize());
   printElaps(iStart,iElips, "reduceNeighboredInterleaved", grid, block);
+  cudaFree(d_idata_3);
+  cudaFree(d_odata_3);
 
-  cudaMemcpy(h_odata, d_odata_2, output_size, cudaMemcpyDeviceToHost);
-
-  printf("looping %d\n", output_size);
-  for (int i = 1; i < grid.x; i++) {
-    h_odata[0] += h_odata[i];
-  }
-
-  checkResult(h_check_odata, h_odata, nx);
+  //===-----------------------reduceUnrolling2----------------------------------
+  int *h_odata_4,*d_idata_4,*d_odata_4;
+  host_malloc((int**)&h_odata_4, output_size);
+  cudaMalloc((int**)&d_idata_4, NBytes);
+  cudaMalloc((int**)&d_odata_4, output_size);
+  cudaMemcpy(d_idata_4, h_idata, NBytes, cudaMemcpyHostToDevice);
+  iStart = cpuSecond();
+  reduceUnrolling2<<< grid.x/2, block>>> (d_idata_4, d_odata_4, nx);
+  CHECK(cudaDeviceSynchronize());
+  printElaps(iStart,iElips, "reduceUnrolling2", grid, block);
+  cudaMemcpy(h_odata_4, d_odata_4, output_size, cudaMemcpyDeviceToHost);
+  hostAccumulateToIndex0(h_odata_4, grid.x/2);
+  checkResult(h_check_odata, h_odata_4, nx);
+  cudaFree(d_idata_4);
+  cudaFree(d_odata_4);
 
 
   cudaFree(d_idata_1);

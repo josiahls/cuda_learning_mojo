@@ -66,7 +66,7 @@ fn warming_up(c:Float32Ptr):
   else:
     b = 200.0
   
-  c[tid] = a + b;
+  c[tid] = a + b
 
 
 fn math_kernel_1(c:Float32Ptr):
@@ -92,7 +92,7 @@ fn math_kernel_2(c:Float32Ptr):
   else:
     b = 200.0
 
-  c[tid] = a + b;
+  c[tid] = a + b
 
 
 fn math_kernel_3(c:Float32Ptr):
@@ -120,7 +120,7 @@ def main():
   var n_bytes = size * sys.info.size_of[Float32]()
   if (len(sys.argv()) > 1): block_size = Int(sys.argv()[1])
   if (len(sys.argv()) > 2): size = Int(sys.argv()[2])
-  print("Data size ", size);
+  print("Data size ", size)
 
   var block: Dim = (block_size, 1)
   var grid: Dim = {Int((size + block.x() - 1) / block.x()), 1}

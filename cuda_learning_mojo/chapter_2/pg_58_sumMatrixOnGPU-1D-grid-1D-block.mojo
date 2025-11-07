@@ -94,11 +94,11 @@ fn main() raises:
     gpu_info: GPUInfo = GPUInfo.from_name[_accelerator_arch()]()
     print("Using Device ", gpu_info)
 
-    alias nx: Int = 1 << 14 # 14 16,384 elements.
-    alias ny: Int = 1 << 14
+    alias nx: UInt = 1 << 14 # 14 16,384 elements.
+    alias ny: UInt = 1 << 14
 
     alias nxy: UInt = UInt(nx * ny)
-    alias nBytes: Int = nxy * UInt(sys.info.size_of[Float32]())
+    alias nBytes: UInt = nxy * UInt(sys.info.size_of[Float32]())
     print("Matrix size: nx", nx, "ny", ny)
 
     # malloc host memory

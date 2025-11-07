@@ -47,7 +47,12 @@ format = { cmd = [
 ]}
 
 build = { cmd = [
-    "mojo", "build", "$CUDA_LEARNING_INCLUDES", "-g1", "example_binding_gen.mojo"
+    "mkdir","-p","build/{{ mojo_file_dir }}",
+    "&&",
+    "mojo", "build", "-g2", "{{ mojo_file_dir }}/{{ mojo_file_name }}","-o","build/{{ mojo_file_dir }}/{{ mojo_file_name }}"
+], args = [
+    { arg = "mojo_file_dir" },
+    { arg = "mojo_file_name" },
 ]}
 
 cuda = { cmd = [
