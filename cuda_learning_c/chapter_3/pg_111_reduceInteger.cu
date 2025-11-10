@@ -179,8 +179,8 @@ __global__ void reduceUnrolling2(int *g_idata, int *g_odata, int n) {
 
   if (idx + blockDim.x < n) {
     g_idata[idx] += g_idata[idx + blockDim.x];
-    __syncthreads();
   } 
+  __syncthreads();
 
   for (int stride=blockDim.x / 2; stride  > 0; stride >>= 1) {
     if (tid < stride) {
@@ -194,6 +194,74 @@ __global__ void reduceUnrolling2(int *g_idata, int *g_odata, int n) {
 }
 
 
+__global__ void reduceUnrolling4(int *g_idata, int *g_odata, int n) {
+	unsigned int tid = threadIdx.x;
+	const unsigned int unroll_factor = 4;
+	// We are accessing 2 blocks per thread
+	unsigned int block_start = blockIdx.x * blockDim.x * unroll_factor;
+	unsigned int idx = block_start + threadIdx.x;
+	int *idata = g_idata + block_start;
+  
+	if (idx + blockDim.x * (unroll_factor - 1) < n) {
+	  // Unroll 3 data blocks (4th being handled in the stride loop)
+	  int a1 = g_idata[idx];
+	  int a2 = g_idata[idx + blockDim.x];
+	  int a3 = g_idata[idx + blockDim.x * 2];
+	  int a4 = g_idata[idx + blockDim.x * 3];
+
+	  g_idata[idx] = a1 + a2 + a3 + a4;
+	  
+	} 
+	__syncthreads();
+  
+	for (int stride=blockDim.x / 2; stride  > 0; stride >>= 1) {
+	  if (tid < stride) {
+		idata[tid] += idata[tid + stride];
+	  }
+  
+	  __syncthreads();
+	}
+  
+	if (tid == 0) g_odata[blockIdx.x] = idata[0];
+  }
+
+
+  __global__ void reduceUnrolling8(int *g_idata, int *g_odata, int n) {
+	unsigned int tid = threadIdx.x;
+	const unsigned int unroll_factor = 8;
+	// We are accessing 2 blocks per thread
+	unsigned int block_start = blockIdx.x * blockDim.x * unroll_factor;
+	unsigned int idx = block_start + threadIdx.x;
+	int *idata = g_idata + block_start;
+  
+	if (idx + blockDim.x * (unroll_factor - 1) < n) {
+	  // Unroll 3 data blocks (4th being handled in the stride loop)
+	  int a1 = g_idata[idx];
+	  int a2 = g_idata[idx + blockDim.x];
+	  int a3 = g_idata[idx + blockDim.x * 2];
+	  int a4 = g_idata[idx + blockDim.x * 3];
+	  int a5 = g_idata[idx + blockDim.x * 4];
+	  int a6 = g_idata[idx + blockDim.x * 5];
+	  int a7 = g_idata[idx + blockDim.x * 6];
+	  int a8 = g_idata[idx + blockDim.x * 7];
+
+	  g_idata[idx] = a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8;
+	  
+	} 
+	__syncthreads();
+  
+	for (int stride=blockDim.x / 2; stride  > 0; stride >>= 1) {
+	  if (tid < stride) {
+		idata[tid] += idata[tid + stride];
+	  }
+  
+	  __syncthreads();
+	}
+  
+	if (tid == 0) g_odata[blockIdx.x] = idata[0];
+  }
+
+
 
 void run_reduction_function(
 	void (*gpu_reducer_fn)(int*, int*, int),
@@ -204,17 +272,18 @@ void run_reduction_function(
 	dim3 grid,
 	dim3 block,
 	int nx,
+	int kernel_x_denom=1,
 	int grid_x_denom=1
 ) {
 	double iStart, iElips;
-	int output_size = grid.x * sizeof(int);
+	int output_size = (grid.x / grid_x_denom) * sizeof(int);
 	int *h_odata,*d_idata,*d_odata;
 	host_malloc((int**)&h_odata, output_size);
 	cudaMalloc((int**)&d_idata, NBytes);
 	cudaMalloc((int**)&d_odata, output_size);
 	cudaMemcpy(d_idata, h_idata, NBytes, cudaMemcpyHostToDevice);
 	iStart = cpuSecond();
-	gpu_reducer_fn<<< grid.x/grid_x_denom, block>>> (d_idata, d_odata, nx);
+	gpu_reducer_fn<<< grid.x/kernel_x_denom, block>>> (d_idata, d_odata, nx);
 	CHECK(cudaDeviceSynchronize());
 	printElaps(iStart,iElips, function_name, grid, block);
 	cudaMemcpy(h_odata, d_odata, output_size, cudaMemcpyDeviceToHost);
@@ -303,14 +372,35 @@ int main(int argc, char **argv) {
 	grid,
 	block,
 	nx,
+	2,
 	2
   );
 
+  run_reduction_function(
+	reduceUnrolling4,
+	"reduceUnrolling4",
+	NBytes,
+	h_idata,
+	h_check_odata,
+	grid,
+	block,
+	nx,
+	4,
+	4
+  );
 
-  cudaFree(d_idata_1);
-  cudaFree(d_idata_2);
-  cudaFree(d_odata_1);
-  cudaFree(d_odata_2);
+  run_reduction_function(
+	reduceUnrolling8,
+	"reduceUnrolling8",
+	NBytes,
+	h_idata,
+	h_check_odata,
+	grid,
+	block,
+	nx,
+	8,
+	8
+  );
 
   free(h_idata);
   free(h_odata);
