@@ -124,7 +124,7 @@ fn check_result(h_C: Int32Ptr, h_GpuCheck: Int32Ptr, n_elem: Int):
 
 
 fn test_function_reduce[
-	nx:Int, 
+	nx:Int, # Change this to be inferrable.
 	function: fn(Int32Ptr, Int32Ptr) -> None
 ](
 	mut ctx:DeviceContext, 
@@ -218,7 +218,13 @@ fn main() raises:
 			nx,
 			reduce_neighbored_less[UInt(nx)]
 		](ctx, 'reduce_neighbored_less' ,h_in_data,h_out_data_checked, grid=grid,block=block)
+
+		var small_grid:Dim = {Int(Int(grid.x()) / 2), 1}
+		# Need to be able to do half nx for some operations.
 		test_function_reduce[
 			nx,
 			reduce_unrolling_2[UInt(nx)]
-		](ctx, 'reduce_unrolling_2' ,h_in_data,h_out_data_checked, grid=grid,block=block)
+		](ctx, 'reduce_unrolling_2' ,h_in_data,h_out_data_checked, 
+			grid=small_grid,
+			block=block
+		)

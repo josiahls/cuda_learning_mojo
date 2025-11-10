@@ -84,7 +84,7 @@ void hostReduceNeighbored(int *g_idata, int *g_odata, int n) {
 __device__ void __syncthreads(void);
 
 
-__global__ void reduceNeighbored(int *g_idata, int *g_odata, unsigned int n) {
+__global__ void reduceNeighbored(int *g_idata, int *g_odata, int n) {
   // e.g. thread 1
   unsigned int tid = threadIdx.x;
   // e.g.: block 1 * 512(block size) + 1 -> 513
@@ -195,6 +195,38 @@ __global__ void reduceUnrolling2(int *g_idata, int *g_odata, int n) {
 
 
 
+void run_reduction_function(
+	void (*gpu_reducer_fn)(int*, int*, int),
+	const char * function_name,
+	int NBytes,
+	int *h_idata,
+	int *h_check_odata,
+	dim3 grid,
+	dim3 block,
+	int nx,
+	int grid_x_denom=1
+) {
+	double iStart, iElips;
+	int output_size = grid.x * sizeof(int);
+	int *h_odata,*d_idata,*d_odata;
+	host_malloc((int**)&h_odata, output_size);
+	cudaMalloc((int**)&d_idata, NBytes);
+	cudaMalloc((int**)&d_odata, output_size);
+	cudaMemcpy(d_idata, h_idata, NBytes, cudaMemcpyHostToDevice);
+	iStart = cpuSecond();
+	gpu_reducer_fn<<< grid.x/grid_x_denom, block>>> (d_idata, d_odata, nx);
+	CHECK(cudaDeviceSynchronize());
+	printElaps(iStart,iElips, function_name, grid, block);
+	cudaMemcpy(h_odata, d_odata, output_size, cudaMemcpyDeviceToHost);
+	hostAccumulateToIndex0(h_odata, grid.x/grid_x_denom);
+	checkResult(h_check_odata, h_odata, nx);
+	cudaFree(d_idata);
+	cudaFree(d_odata);
+	free(h_odata);
+}
+
+
+
 int main(int argc, char **argv) {
   const int dev = 0;
   cudaDeviceProp deviceProp;
@@ -224,61 +256,55 @@ int main(int argc, char **argv) {
 
   initialData(h_idata, nx);
 
-  int *d_idata_1,*d_idata_2, *d_odata_1, *d_odata_2;
-
-  cudaMalloc((int**)&d_idata_1, NBytes);
-  cudaMalloc((int**)&d_idata_2, NBytes);
-  cudaMalloc((int**)&d_odata_1, output_size);
-  cudaMalloc((int**)&d_odata_2, output_size);
-
-  cudaMemcpy(d_idata_1, h_idata, NBytes, cudaMemcpyHostToDevice);
-  cudaMemcpy(d_idata_2, h_idata, NBytes, cudaMemcpyHostToDevice);
-
   double iStart, iElips;
   iStart = cpuSecond();
   hostReduceNeighbored(h_idata, h_check_odata, nx);
   printElaps(iStart,iElips, "hostReduceNeighbored", grid, block);
 
-  iStart = cpuSecond();
-  reduceNeighbored<<< grid, block>>> (d_idata_1, d_odata_1, nx);
-  CHECK(cudaDeviceSynchronize());
-  printElaps(iStart,iElips, "reduceNeighbored", grid, block);
+  run_reduction_function(
+	reduceNeighbored,
+	"reduceNeighbored",
+	NBytes,
+	h_idata,
+	h_check_odata,
+	grid,
+	block,
+	nx
+  );
 
-  iStart = cpuSecond();
-  reduceNeighboredLess<<< grid, block>>> (d_idata_2, d_odata_2, nx);
-  CHECK(cudaDeviceSynchronize());
-  printElaps(iStart,iElips, "reduceNeighboredLess", grid, block);
-  cudaMemcpy(h_odata, d_odata_2, output_size, cudaMemcpyDeviceToHost);
-  hostAccumulateToIndex0(h_odata, grid.x);
-  checkResult(h_check_odata, h_odata, nx);
+  run_reduction_function(
+	reduceNeighboredLess,
+	"reduceNeighboredLess",
+	NBytes,
+	h_idata,
+	h_check_odata,
+	grid,
+	block,
+	nx
+  );
 
-
-  int *d_idata_3,*d_odata_3;
-  cudaMalloc((int**)&d_idata_3, NBytes);
-  cudaMalloc((int**)&d_odata_3, output_size);
-  cudaMemcpy(d_idata_3, h_idata, NBytes, cudaMemcpyHostToDevice);
-  iStart = cpuSecond();
-  reduceNeighboredInterleaved<<< grid, block>>> (d_idata_3, d_odata_3, nx);
-  CHECK(cudaDeviceSynchronize());
-  printElaps(iStart,iElips, "reduceNeighboredInterleaved", grid, block);
-  cudaFree(d_idata_3);
-  cudaFree(d_odata_3);
-
+  run_reduction_function(
+	reduceNeighboredInterleaved,
+	"reduceNeighboredInterleaved",
+	NBytes,
+	h_idata,
+	h_check_odata,
+	grid,
+	block,
+	nx
+  );
   //===-----------------------reduceUnrolling2----------------------------------
-  int *h_odata_4,*d_idata_4,*d_odata_4;
-  host_malloc((int**)&h_odata_4, output_size);
-  cudaMalloc((int**)&d_idata_4, NBytes);
-  cudaMalloc((int**)&d_odata_4, output_size);
-  cudaMemcpy(d_idata_4, h_idata, NBytes, cudaMemcpyHostToDevice);
-  iStart = cpuSecond();
-  reduceUnrolling2<<< grid.x/2, block>>> (d_idata_4, d_odata_4, nx);
-  CHECK(cudaDeviceSynchronize());
-  printElaps(iStart,iElips, "reduceUnrolling2", grid, block);
-  cudaMemcpy(h_odata_4, d_odata_4, output_size, cudaMemcpyDeviceToHost);
-  hostAccumulateToIndex0(h_odata_4, grid.x/2);
-  checkResult(h_check_odata, h_odata_4, nx);
-  cudaFree(d_idata_4);
-  cudaFree(d_odata_4);
+  run_reduction_function(
+	reduceUnrolling2,
+	"reduceUnrolling2",
+	NBytes,
+	h_idata,
+	h_check_odata,
+	grid,
+	block,
+	nx,
+	2
+  );
 
 
   cudaFree(d_idata_1);
