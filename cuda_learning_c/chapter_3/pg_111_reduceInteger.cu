@@ -170,7 +170,27 @@ __global__ void reduceNeighboredInterleaved(int *g_idata, int *g_odata, int n) {
   if (tid == 0) g_odata[blockIdx.x] = idata[0];
 }
 
+/*
+Given an array of size 32, and block size 8
 
+tid = 0
+   sum 0 + 8 (8) -> 0
+   for stride in [4, 2]
+      sum 0 + 4 (4) -> 0
+	  sum 0 + 2 (2) -> 0
+
+tid = 1
+   sum 1 + 8 (9) -> 1
+   for stride in [4, 2]
+      sum 1 + 4 (5) -> 1
+	  sum 1 + 2 (3) -> 1
+
+tid = 2
+   sum 2 + 8 (10) -> 2
+   for stride in [4, 2]
+      sum 2 + 4 (6) -> 2
+	  // ignored since tid must be < stride: sum 2 + 2 (4) -> 2
+*/
 __global__ void reduceUnrolling2(int *g_idata, int *g_odata, int n) {
   unsigned int tid = threadIdx.x;
   // We are accessing 2 blocks per thread
@@ -178,6 +198,10 @@ __global__ void reduceUnrolling2(int *g_idata, int *g_odata, int n) {
   int *idata = g_idata + blockIdx.x * blockDim.x * 2;
 
   if (idx + blockDim.x < n) {
+	// Note: these are 2 blocks being unrolled. Equiv:
+	//    int a1 = g_idata[idx]
+	//    int a2 = g_idata[idx + blockDim.x]
+	//    g_idata[idx] = a1 + a2; 
     g_idata[idx] += g_idata[idx + blockDim.x];
   } 
   __syncthreads();
@@ -235,7 +259,7 @@ __global__ void reduceUnrolling4(int *g_idata, int *g_odata, int n) {
 	int *idata = g_idata + block_start;
   
 	if (idx + blockDim.x * (unroll_factor - 1) < n) {
-	  // Unroll 3 data blocks (4th being handled in the stride loop)
+	  // Unroll 8 data blocks (4th being handled in the stride loop)
 	  int a1 = g_idata[idx];
 	  int a2 = g_idata[idx + blockDim.x];
 	  int a3 = g_idata[idx + blockDim.x * 2];
@@ -249,6 +273,8 @@ __global__ void reduceUnrolling4(int *g_idata, int *g_odata, int n) {
 	  
 	} 
 	__syncthreads();
+
+	// 512 -> 256
   
 	for (int stride=blockDim.x / 2; stride  > 0; stride >>= 1) {
 	  if (tid < stride) {
