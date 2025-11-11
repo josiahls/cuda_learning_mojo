@@ -274,6 +274,51 @@ __global__ void reduceUnrolling4(int *g_idata, int *g_odata, int n) {
   }
 
 
+__global__ void reduceUnrolling8UnrollLastWarp(int *g_idata, int *g_odata, int n) {
+	unsigned int tid = threadIdx.x;
+	const unsigned int unroll_factor = 8;
+	// We are accessing 2 blocks per thread
+	unsigned int block_start = blockIdx.x * blockDim.x * unroll_factor;
+	unsigned int idx = block_start + threadIdx.x;
+	int *idata = g_idata + block_start;
+
+	if (idx + blockDim.x * (unroll_factor - 1) < n) {
+		// Unroll 8 data blocks (4th being handled in the stride loop)
+		int a1 = g_idata[idx];
+		int a2 = g_idata[idx + blockDim.x];
+		int a3 = g_idata[idx + blockDim.x * 2];
+		int a4 = g_idata[idx + blockDim.x * 3];
+		int a5 = g_idata[idx + blockDim.x * 4];
+		int a6 = g_idata[idx + blockDim.x * 5];
+		int a7 = g_idata[idx + blockDim.x * 6];
+		int a8 = g_idata[idx + blockDim.x * 7];
+
+		g_idata[idx] = a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8;
+		
+	} 
+	__syncthreads();
+
+	for (int stride=blockDim.x / 2; stride  > 32; stride >>= 1) {
+		if (tid < stride) {
+			idata[tid] += idata[tid + stride];
+		}
+
+		__syncthreads();
+	}
+
+	if (tid < warpSize) {
+		volatile int *vmem = idata;
+		vmem[tid] += vmem[tid + 32];
+		vmem[tid] += vmem[tid + 16];
+		vmem[tid] += vmem[tid +  8];
+		vmem[tid] += vmem[tid +  4];
+		vmem[tid] += vmem[tid +  2];
+		vmem[tid] += vmem[tid +  1];
+	}
+
+	if (tid == 0) g_odata[blockIdx.x] = idata[0];
+}
+
 
 void run_reduction_function(
 	void (*gpu_reducer_fn)(int*, int*, int),
@@ -307,7 +352,20 @@ void run_reduction_function(
 }
 
 
+/**
+  ncu --metric sm__warps_active.avg.pct_of_peak_sustained_active build/cuda_learning_c/chapter_3/pg_111_reduceInteger
 
+  ncu --metric 	l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second build/cuda_learning_c/chapter_3/pg_111_reduceInteger
+
+  ncu --metric 	l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum build/cuda_learning_c/chapter_3/pg_111_reduceInteger
+
+  ncu --metric smsp__warp_issue_stalled_membar_per_warp_active.pct build/cuda_learning_c/chapter_3/pg_111_reduceInteger
+
+  	
+
+
+
+*/
 int main(int argc, char **argv) {
   const int dev = 0;
   cudaDeviceProp deviceProp;
@@ -404,6 +462,19 @@ int main(int argc, char **argv) {
   run_reduction_function(
 	reduceUnrolling8,
 	"reduceUnrolling8",
+	NBytes,
+	h_idata,
+	h_check_odata,
+	grid,
+	block,
+	nx,
+	8,
+	8
+  );
+
+  run_reduction_function(
+	reduceUnrolling8UnrollLastWarp,
+	"reduceUnrolling8UnrollLastWarp",
 	NBytes,
 	h_idata,
 	h_check_odata,
