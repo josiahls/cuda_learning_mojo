@@ -150,11 +150,6 @@ __global__ void reduceNeighboredInterleaved(int *g_idata, int *g_odata, int n) {
     return;
   } 
 
-  // stride >>= 1 means shift right 1 bit. e.g.:
-  //  - If stride is         512 -> 000100000000
-  //  - then 1 iter becomes: 256 -> 000010000000
-  // In the case below, stride would actually start at 256 since in this example
-  // blockDim is 512. So it would go 128 -> 64 -> 32 -> 16 -> 8 -> 4 -> 2
   for (int stride=blockDim.x / 2; stride  > 0; stride >>= 1) {
     if (tid < stride) {
       // If stride is 128 and tid is 0
@@ -171,50 +166,41 @@ __global__ void reduceNeighboredInterleaved(int *g_idata, int *g_odata, int n) {
 }
 
 /*
-Given an array of size 32, and block size 8
-
-tid = 0
-   sum 0 + 8 (8) -> 0
-   for stride in [4, 2]
-      sum 0 + 4 (4) -> 0
-	  sum 0 + 2 (2) -> 0
-
-tid = 1
-   sum 1 + 8 (9) -> 1
-   for stride in [4, 2]
-      sum 1 + 4 (5) -> 1
-	  sum 1 + 2 (3) -> 1
-
-tid = 2
-   sum 2 + 8 (10) -> 2
-   for stride in [4, 2]
-      sum 2 + 4 (6) -> 2
-	  // ignored since tid must be < stride: sum 2 + 2 (4) -> 2
+Opted for just a diagram: 
+cuda_learning_c/chapter_3/images/pg_111_reduceInteger_unrolling.png
 */
 __global__ void reduceUnrolling2(int *g_idata, int *g_odata, int n) {
-  unsigned int tid = threadIdx.x;
-  // We are accessing 2 blocks per thread
-  unsigned int idx = blockIdx.x * blockDim.x * 2 + threadIdx.x;
-  int *idata = g_idata + blockIdx.x * blockDim.x * 2;
+	unsigned int tid = threadIdx.x;
+	// We are accessing 2 blocks per thread
+	unsigned int idx = blockIdx.x * blockDim.x * 2 + threadIdx.x;
+	int *idata = g_idata + blockIdx.x * blockDim.x * 2;
 
-  if (idx + blockDim.x < n) {
+	// The unroll is summing consequtive data blocks
+	if (idx + blockDim.x < n) {
 	// Note: these are 2 blocks being unrolled. Equiv:
 	//    int a1 = g_idata[idx]
 	//    int a2 = g_idata[idx + blockDim.x]
 	//    g_idata[idx] = a1 + a2; 
-    g_idata[idx] += g_idata[idx + blockDim.x];
-  } 
-  __syncthreads();
 
-  for (int stride=blockDim.x / 2; stride  > 0; stride >>= 1) {
-    if (tid < stride) {
-      idata[tid] += idata[tid + stride];
-    }
+	// Example of unrolling if block size is 32:
+	// where [tid,idx,sum_idx]:
 
-    __syncthreads();
-  }
+	g_idata[idx] += g_idata[idx + blockDim.x];
+	} 
+	__syncthreads();
 
-  if (tid == 0) g_odata[blockIdx.x] = idata[0];
+	// Important note, the reason why teh below loop doesn't change
+	// with the number of unrolls is because the grid itself
+	// is scaled smaller.
+	for (int stride=blockDim.x / 2; stride  > 0; stride >>= 1) {
+	if (tid < stride) {
+		idata[tid] += idata[tid + stride];
+	}
+
+	__syncthreads();
+	}
+
+	if (tid == 0) g_odata[blockIdx.x] = idata[0];
 }
 
 
