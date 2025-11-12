@@ -307,6 +307,110 @@ __global__ void reduceUnrolling8UnrollLastWarp(int *g_idata, int *g_odata, int n
 	}
 
 	if (tid < warpSize) {
+		// Note manually unrolls the final strides of the above for loop.
+		// Note: Removing volatile doesn't effect this, but likely because
+		// this is otherwise nondeterministic.
+		volatile int *vmem = idata;
+		vmem[tid] += vmem[tid + 32];
+		vmem[tid] += vmem[tid + 16];
+		vmem[tid] += vmem[tid +  8];
+		vmem[tid] += vmem[tid +  4];
+		vmem[tid] += vmem[tid +  2];
+		vmem[tid] += vmem[tid +  1];
+	}
+
+	if (tid == 0) g_odata[blockIdx.x] = idata[0];
+}
+
+
+__global__ void reduceUnrolling8UnrollEverything(int *g_idata, int *g_odata, int n) {
+	unsigned int tid = threadIdx.x;
+	const unsigned int unroll_factor = 8;
+	// We are accessing 2 blocks per thread
+	unsigned int block_start = blockIdx.x * blockDim.x * unroll_factor;
+	unsigned int idx = block_start + threadIdx.x;
+	int *idata = g_idata + block_start;
+
+	if (idx + blockDim.x * (unroll_factor - 1) < n) {
+		// Unroll 8 data blocks (4th being handled in the stride loop)
+		int a1 = g_idata[idx];
+		int a2 = g_idata[idx + blockDim.x];
+		int a3 = g_idata[idx + blockDim.x * 2];
+		int a4 = g_idata[idx + blockDim.x * 3];
+		int a5 = g_idata[idx + blockDim.x * 4];
+		int a6 = g_idata[idx + blockDim.x * 5];
+		int a7 = g_idata[idx + blockDim.x * 6];
+		int a8 = g_idata[idx + blockDim.x * 7];
+
+		g_idata[idx] = a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8;
+		
+	} 
+	__syncthreads();
+
+	if (blockDim.x >= 1024 && tid < 512) { idata[tid] += idata[tid + 512]; }
+	__syncthreads();
+	if (blockDim.x >= 512 && tid < 256) { idata[tid] += idata[tid + 256]; }
+	__syncthreads();
+	if (blockDim.x >= 256 && tid < 128) { idata[tid] += idata[tid + 128]; }
+	__syncthreads();
+	if (blockDim.x >= 128 && tid < 64) { idata[tid] += idata[tid + 64]; }
+	__syncthreads();
+
+	if (tid < warpSize) {
+		// Note manually unrolls the final strides of the above for loop.
+		// Note: Removing volatile doesn't effect this, but likely because
+		// this is otherwise nondeterministic.
+		volatile int *vmem = idata;
+		vmem[tid] += vmem[tid + 32];
+		vmem[tid] += vmem[tid + 16];
+		vmem[tid] += vmem[tid +  8];
+		vmem[tid] += vmem[tid +  4];
+		vmem[tid] += vmem[tid +  2];
+		vmem[tid] += vmem[tid +  1];
+	}
+
+	if (tid == 0) g_odata[blockIdx.x] = idata[0];
+}
+
+
+template<unsigned int IBlockSize>
+__global__ void reduceUnrolling8UnrollEverythingWithTemplate(int *g_idata, int *g_odata, int n) {
+	unsigned int tid = threadIdx.x;
+	const unsigned int unroll_factor = 8;
+	// We are accessing 2 blocks per thread
+	unsigned int block_start = blockIdx.x * blockDim.x * unroll_factor;
+	unsigned int idx = block_start + threadIdx.x;
+	int *idata = g_idata + block_start;
+
+	if (idx + blockDim.x * (unroll_factor - 1) < n) {
+		// Unroll 8 data blocks (4th being handled in the stride loop)
+		int a1 = g_idata[idx];
+		int a2 = g_idata[idx + blockDim.x];
+		int a3 = g_idata[idx + blockDim.x * 2];
+		int a4 = g_idata[idx + blockDim.x * 3];
+		int a5 = g_idata[idx + blockDim.x * 4];
+		int a6 = g_idata[idx + blockDim.x * 5];
+		int a7 = g_idata[idx + blockDim.x * 6];
+		int a8 = g_idata[idx + blockDim.x * 7];
+
+		g_idata[idx] = a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8;
+		
+	} 
+	__syncthreads();
+
+	if (IBlockSize >= 1024 && tid < 512) { idata[tid] += idata[tid + 512]; }
+	__syncthreads();
+	if (IBlockSize >= 512 && tid < 256) { idata[tid] += idata[tid + 256]; }
+	__syncthreads();
+	if (IBlockSize >= 256 && tid < 128) { idata[tid] += idata[tid + 128]; }
+	__syncthreads();
+	if (IBlockSize >= 128 && tid < 64) { idata[tid] += idata[tid + 64]; }
+	__syncthreads();
+
+	if (tid < warpSize) {
+		// Note manually unrolls the final strides of the above for loop.
+		// Note: Removing volatile doesn't effect this, but likely because
+		// this is otherwise nondeterministic.
 		volatile int *vmem = idata;
 		vmem[tid] += vmem[tid + 32];
 		vmem[tid] += vmem[tid + 16];
@@ -330,7 +434,8 @@ void run_reduction_function(
 	dim3 block,
 	int nx,
 	int kernel_x_denom=1,
-	int grid_x_denom=1
+	int grid_x_denom=1,
+	bool use_template = false
 ) {
 	double iStart, iElips;
 	int output_size = (grid.x / grid_x_denom) * sizeof(int);
@@ -340,7 +445,9 @@ void run_reduction_function(
 	cudaMalloc((int**)&d_odata, output_size);
 	cudaMemcpy(d_idata, h_idata, NBytes, cudaMemcpyHostToDevice);
 	iStart = cpuSecond();
+
 	gpu_reducer_fn<<< grid.x/kernel_x_denom, block>>> (d_idata, d_odata, nx);
+
 	CHECK(cudaDeviceSynchronize());
 	printElaps(iStart,iElips, function_name, grid, block);
 	cudaMemcpy(h_odata, d_odata, output_size, cudaMemcpyDeviceToHost);
@@ -352,19 +459,57 @@ void run_reduction_function(
 }
 
 
+void templated_run_reduction_function(
+	const char * function_name,
+	int NBytes,
+	int *h_idata,
+	int *h_check_odata,
+	dim3 grid,
+	dim3 block,
+	int nx,
+	int kernel_x_denom=1,
+	int grid_x_denom=1
+) {
+	double iStart, iElips;
+	int output_size = (grid.x / grid_x_denom) * sizeof(int);
+	int *h_odata,*d_idata,*d_odata;
+	host_malloc((int**)&h_odata, output_size);
+	cudaMalloc((int**)&d_idata, NBytes);
+	cudaMalloc((int**)&d_odata, output_size);
+	cudaMemcpy(d_idata, h_idata, NBytes, cudaMemcpyHostToDevice);
+	iStart = cpuSecond();
+	switch (block.x * block.y) {
+		case 1024:
+			reduceUnrolling8UnrollEverythingWithTemplate<1024><<< grid.x/kernel_x_denom, block>>> (d_idata, d_odata, nx);
+			break;
+		case 512:
+			reduceUnrolling8UnrollEverythingWithTemplate<512><<< grid.x/kernel_x_denom, block>>> (d_idata, d_odata, nx);
+			break;
+		case 256:
+			reduceUnrolling8UnrollEverythingWithTemplate<256><<< grid.x/kernel_x_denom, block>>> (d_idata, d_odata, nx);
+			break;
+		case 128:
+			reduceUnrolling8UnrollEverythingWithTemplate<128><<< grid.x/kernel_x_denom, block>>> (d_idata, d_odata, nx);
+			break;
+		case 64:
+			reduceUnrolling8UnrollEverythingWithTemplate<64><<< grid.x/kernel_x_denom, block>>> (d_idata, d_odata, nx);
+			break;
+	}
+	CHECK(cudaDeviceSynchronize());
+	printElaps(iStart,iElips, function_name, grid, block);
+	cudaMemcpy(h_odata, d_odata, output_size, cudaMemcpyDeviceToHost);
+	hostAccumulateToIndex0(h_odata, grid.x/grid_x_denom);
+	checkResult(h_check_odata, h_odata, nx);
+	cudaFree(d_idata);
+	cudaFree(d_odata);
+	free(h_odata);
+}
+
 /**
   ncu --metric sm__warps_active.avg.pct_of_peak_sustained_active build/cuda_learning_c/chapter_3/pg_111_reduceInteger
-
   ncu --metric 	l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second build/cuda_learning_c/chapter_3/pg_111_reduceInteger
-
   ncu --metric 	l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum build/cuda_learning_c/chapter_3/pg_111_reduceInteger
-
   ncu --metric smsp__warp_issue_stalled_membar_per_warp_active.pct build/cuda_learning_c/chapter_3/pg_111_reduceInteger
-
-  	
-
-
-
 */
 int main(int argc, char **argv) {
   const int dev = 0;
@@ -475,6 +620,31 @@ int main(int argc, char **argv) {
   run_reduction_function(
 	reduceUnrolling8UnrollLastWarp,
 	"reduceUnrolling8UnrollLastWarp",
+	NBytes,
+	h_idata,
+	h_check_odata,
+	grid,
+	block,
+	nx,
+	8,
+	8
+  );
+
+  run_reduction_function(
+	reduceUnrolling8UnrollEverything,
+	"reduceUnrolling8UnrollEverything",
+	NBytes,
+	h_idata,
+	h_check_odata,
+	grid,
+	block,
+	nx,
+	8,
+	8
+  );
+
+  templated_run_reduction_function(
+	"reduceUnrolling8UnrollEverythingWithTemplate",
 	NBytes,
 	h_idata,
 	h_check_odata,
