@@ -1,0 +1,8 @@
+CompileFlags:
+  Add:
+    - -xcuda
+    - --cuda-gpu-arch=sm_75
+    - --no-cuda-version-check
+Diagnostics:
+  Suppress:
+    - err_ref_bad_target  # Allow CUDA dynamic parallelism
