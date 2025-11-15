@@ -1,7 +1,9 @@
 //===---------------------------BOILER PLATE--------------------------------====
+#include <atomic>
 #include <climits>
 #include <cstdio>
 #include <cuda_runtime.h>
+#include <cuda/atomic>
 #include <stdio.h>
 #include <sys/time.h>
 #include <time.h>
@@ -177,15 +179,15 @@ __global__ void reduceUnrolling2(int *g_idata, int *g_odata, int n) {
 
 	// The unroll is summing consequtive data blocks
 	if (idx + blockDim.x < n) {
-	// Note: these are 2 blocks being unrolled. Equiv:
-	//    int a1 = g_idata[idx]
-	//    int a2 = g_idata[idx + blockDim.x]
-	//    g_idata[idx] = a1 + a2; 
+		// Note: these are 2 blocks being unrolled. Equiv:
+		//    int a1 = g_idata[idx]
+		//    int a2 = g_idata[idx + blockDim.x]
+		//    g_idata[idx] = a1 + a2; 
 
-	// Example of unrolling if block size is 32:
-	// where [tid,idx,sum_idx]:
+		// Example of unrolling if block size is 32:
+		// where [tid,idx,sum_idx]:
 
-	g_idata[idx] += g_idata[idx + blockDim.x];
+		g_idata[idx] += g_idata[idx + blockDim.x];
 	} 
 	__syncthreads();
 
@@ -310,13 +312,14 @@ __global__ void reduceUnrolling8UnrollLastWarp(int *g_idata, int *g_odata, int n
 		// Note manually unrolls the final strides of the above for loop.
 		// Note: Removing volatile doesn't effect this, but likely because
 		// this is otherwise nondeterministic.
-		volatile int *vmem = idata;
-		vmem[tid] += vmem[tid + 32];
-		vmem[tid] += vmem[tid + 16];
-		vmem[tid] += vmem[tid +  8];
-		vmem[tid] += vmem[tid +  4];
-		vmem[tid] += vmem[tid +  2];
-		vmem[tid] += vmem[tid +  1];
+		volatile int *vmem = idata;// If all values are 10
+		//                            vmem[idx] == 10
+		vmem[tid] += vmem[tid + 32];//vmem[idx] == 20
+		vmem[tid] += vmem[tid + 16];//vmem[idx] == 30
+		vmem[tid] += vmem[tid +  8];//vmem[idx] == 40
+		vmem[tid] += vmem[tid +  4];//vmem[idx] == 50
+		vmem[tid] += vmem[tid +  2];//vmem[idx] == 60
+		vmem[tid] += vmem[tid +  1];//vmem[idx] == 70
 	}
 
 	if (tid == 0) g_odata[blockIdx.x] = idata[0];
@@ -411,6 +414,13 @@ __global__ void reduceUnrolling8UnrollEverythingWithTemplate(int *g_idata, int *
 		// Note manually unrolls the final strides of the above for loop.
 		// Note: Removing volatile doesn't effect this, but likely because
 		// this is otherwise nondeterministic.
+		// printf("Entering the atomics\n");
+		// cuda::atomic_ref<int, cuda::thread_scope_block> f{*flag};
+
+		// Additional note, volatile is not the best solution here.
+		// An actual solution would use warp level synchronization primatives.
+		// However this is from the textbook I'm working through and 
+		// am hoping that it replaces with this a better solution (warp sync?)
 		volatile int *vmem = idata;
 		vmem[tid] += vmem[tid + 32];
 		vmem[tid] += vmem[tid + 16];
@@ -418,6 +428,7 @@ __global__ void reduceUnrolling8UnrollEverythingWithTemplate(int *g_idata, int *
 		vmem[tid] += vmem[tid +  4];
 		vmem[tid] += vmem[tid +  2];
 		vmem[tid] += vmem[tid +  1];
+
 	}
 
 	if (tid == 0) g_odata[blockIdx.x] = idata[0];
@@ -427,7 +438,6 @@ __global__ void reduceUnrolling8UnrollEverythingWithTemplate(int *g_idata, int *
 void run_reduction_function(
 	void (*gpu_reducer_fn)(int*, int*, int),
 	const char * function_name,
-	int NBytes,
 	int *h_idata,
 	int *h_check_odata,
 	dim3 grid,
@@ -438,12 +448,13 @@ void run_reduction_function(
 	bool use_template = false
 ) {
 	double iStart, iElips;
+	int input_size = nx * sizeof(int);
 	int output_size = (grid.x / grid_x_denom) * sizeof(int);
 	int *h_odata,*d_idata,*d_odata;
 	host_malloc((int**)&h_odata, output_size);
-	cudaMalloc((int**)&d_idata, NBytes);
+	cudaMalloc((int**)&d_idata, input_size);
 	cudaMalloc((int**)&d_odata, output_size);
-	cudaMemcpy(d_idata, h_idata, NBytes, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_idata, h_idata, input_size, cudaMemcpyHostToDevice);
 	iStart = cpuSecond();
 
 	gpu_reducer_fn<<< grid.x/kernel_x_denom, block>>> (d_idata, d_odata, nx);
@@ -461,7 +472,6 @@ void run_reduction_function(
 
 void templated_run_reduction_function(
 	const char * function_name,
-	int NBytes,
 	int *h_idata,
 	int *h_check_odata,
 	dim3 grid,
@@ -471,28 +481,29 @@ void templated_run_reduction_function(
 	int grid_x_denom=1
 ) {
 	double iStart, iElips;
+	int input_size = nx * sizeof(int);
 	int output_size = (grid.x / grid_x_denom) * sizeof(int);
 	int *h_odata,*d_idata,*d_odata;
 	host_malloc((int**)&h_odata, output_size);
-	cudaMalloc((int**)&d_idata, NBytes);
+	cudaMalloc((int**)&d_idata, input_size);
 	cudaMalloc((int**)&d_odata, output_size);
-	cudaMemcpy(d_idata, h_idata, NBytes, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_idata, h_idata, input_size, cudaMemcpyHostToDevice);
 	iStart = cpuSecond();
 	switch (block.x * block.y) {
 		case 1024:
-			reduceUnrolling8UnrollEverythingWithTemplate<1024><<< grid.x/kernel_x_denom, block>>> (d_idata, d_odata, nx);
+			reduceUnrolling8UnrollEverythingWithTemplate<1024><<< grid.x/kernel_x_denom, block>>> ( d_idata, d_odata, nx);
 			break;
 		case 512:
 			reduceUnrolling8UnrollEverythingWithTemplate<512><<< grid.x/kernel_x_denom, block>>> (d_idata, d_odata, nx);
 			break;
 		case 256:
-			reduceUnrolling8UnrollEverythingWithTemplate<256><<< grid.x/kernel_x_denom, block>>> (d_idata, d_odata, nx);
+			reduceUnrolling8UnrollEverythingWithTemplate<256><<< grid.x/kernel_x_denom, block>>> ( d_idata, d_odata, nx);
 			break;
 		case 128:
 			reduceUnrolling8UnrollEverythingWithTemplate<128><<< grid.x/kernel_x_denom, block>>> (d_idata, d_odata, nx);
 			break;
 		case 64:
-			reduceUnrolling8UnrollEverythingWithTemplate<64><<< grid.x/kernel_x_denom, block>>> (d_idata, d_odata, nx);
+			reduceUnrolling8UnrollEverythingWithTemplate<64><<< grid.x/kernel_x_denom, block>>> ( d_idata, d_odata, nx);
 			break;
 	}
 	CHECK(cudaDeviceSynchronize());
@@ -548,7 +559,6 @@ int main(int argc, char **argv) {
   run_reduction_function(
 	reduceNeighbored,
 	"reduceNeighbored",
-	NBytes,
 	h_idata,
 	h_check_odata,
 	grid,
@@ -559,7 +569,6 @@ int main(int argc, char **argv) {
   run_reduction_function(
 	reduceNeighboredLess,
 	"reduceNeighboredLess",
-	NBytes,
 	h_idata,
 	h_check_odata,
 	grid,
@@ -570,7 +579,6 @@ int main(int argc, char **argv) {
   run_reduction_function(
 	reduceNeighboredInterleaved,
 	"reduceNeighboredInterleaved",
-	NBytes,
 	h_idata,
 	h_check_odata,
 	grid,
@@ -581,7 +589,6 @@ int main(int argc, char **argv) {
   run_reduction_function(
 	reduceUnrolling2,
 	"reduceUnrolling2",
-	NBytes,
 	h_idata,
 	h_check_odata,
 	grid,
@@ -594,7 +601,6 @@ int main(int argc, char **argv) {
   run_reduction_function(
 	reduceUnrolling4,
 	"reduceUnrolling4",
-	NBytes,
 	h_idata,
 	h_check_odata,
 	grid,
@@ -607,7 +613,6 @@ int main(int argc, char **argv) {
   run_reduction_function(
 	reduceUnrolling8,
 	"reduceUnrolling8",
-	NBytes,
 	h_idata,
 	h_check_odata,
 	grid,
@@ -620,7 +625,6 @@ int main(int argc, char **argv) {
   run_reduction_function(
 	reduceUnrolling8UnrollLastWarp,
 	"reduceUnrolling8UnrollLastWarp",
-	NBytes,
 	h_idata,
 	h_check_odata,
 	grid,
@@ -633,7 +637,6 @@ int main(int argc, char **argv) {
   run_reduction_function(
 	reduceUnrolling8UnrollEverything,
 	"reduceUnrolling8UnrollEverything",
-	NBytes,
 	h_idata,
 	h_check_odata,
 	grid,
@@ -645,7 +648,6 @@ int main(int argc, char **argv) {
 
   templated_run_reduction_function(
 	"reduceUnrolling8UnrollEverythingWithTemplate",
-	NBytes,
 	h_idata,
 	h_check_odata,
 	grid,
