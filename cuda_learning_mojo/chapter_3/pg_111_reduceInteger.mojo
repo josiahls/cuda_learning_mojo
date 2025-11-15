@@ -318,13 +318,15 @@ fn reduce_unrolling_8_unroll_everything_templated[n: UInt](in_data: Int32Ptr, ou
     barrier()
 
     alias block_sizes:List[UInt] = [1024, 512, 256, 128, 64]
+    # This is probably a good cause where `block_size` should be known
+    # at comptime instead. A lot of this can be folded away then.
     @parameter
     for i in range(0, len(block_sizes) - 1):
         var current = materialize[block_sizes[i]]()
+        var next:UInt = materialize[block_sizes[i + 1]]()
+        if block_size >= current and  tid < next:
+            i_data[tid] += i_data[tid + next]
         if block_size >= current:
-            var next:UInt = materialize[block_sizes[i + 1]]()
-            if tid < next:
-                i_data[tid] += i_data[tid + next]
             barrier()
 
     if tid < UInt(WARP_SIZE):
