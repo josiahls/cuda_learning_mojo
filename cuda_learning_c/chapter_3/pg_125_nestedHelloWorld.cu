@@ -15,23 +15,25 @@
 
 
 
+  /**
+  Handon, where is iDepth in memory? Is it on the host? I guess it
+  gets copied into the global memory in the gpu. But then we are doing an
+  in place argument modification. I'm guessing then this argument is copied 
+  into shared memory.
+  */
 __global__ void nestedHelloWorld(int const iSize, int iDepth) {
     int tid = threadIdx.x;
     printf("Recursion=%d :Hello World from thread %d block %d\n",
         iDepth, tid,blockIdx.x);
-
     if (iSize == 1) return;
-
     // Decrease the number of threads by the power of 2 (rshift)
     int nthreads = iSize >> 1;
-
     if (tid == 0 && nthreads > 0 ) {
         // Dynamic parallelism - requires -rdc=true for nvcc compilation
         // clangd doesn't support CUDA dynamic parallelism checking
         nestedHelloWorld<<<1, nthreads>>>(nthreads, ++iDepth); // clangd-ignore
         printf("--------> nested execution depth: %d\n",iDepth);
     }
-
 }
 
 
@@ -42,9 +44,9 @@ int main(int argc, char **argv) {
     printf("%s Using device %d: %s \n", argv[0], dev, deviceProp.name);
     CHECK(cudaSetDevice(dev));
 
-    int nx = 1<<4;
     int dimx = 512;
     if (argc > 1) dimx = atoi(argv[1]);
+    int nx = dimx;
     printf("Data size x: %d y: %d\n", dimx, 1);
   
     dim3 block (dimx, 1);
