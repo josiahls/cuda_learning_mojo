@@ -139,6 +139,12 @@ __global__ void reduceNeighboredLess(int *g_idata, int *g_odata, int n) {
 
 
 
+/**
+Note from the book:
+- This is going to yield poor performance since we are calling intra-block synchronization via __syncthreads()
+so much (16,384) times.
+
+*/
 __global__ void gpuRecursiveReduce(int *g_idata, int *g_odata, int isize) {
 	unsigned int tid = threadIdx.x;
 	int *idata = g_idata + blockIdx.x * blockDim.x;
@@ -179,6 +185,90 @@ __global__ void gpuRecursiveReduce(int *g_idata, int *g_odata, int isize) {
 	// __syncthreads();
 }
 
+/**
+Remove additional synchonizations, however I think this is still going to have
+implicit ones no?
+*/
+__global__ void gpuRecursiveReduceNoSync(int *g_idata, int *g_odata, int isize) {
+	unsigned int tid = threadIdx.x;
+	int *idata = g_idata + blockIdx.x * blockDim.x;
+	int *odata = &g_odata[blockIdx.x];
+
+	// stop condition
+	if (isize == 2 && tid == 0) {
+		g_odata[blockIdx.x] = idata[0] + idata[1];
+    return;
+	}
+
+	// nested invocation
+	int istride = isize >> 1;
+
+	if (istride > 1 && tid < istride) {
+		// in place reduction
+		idata[tid] += idata[tid + istride];
+    if (tid == 0 ) {
+      gpuRecursiveReduceNoSync <<<1, istride, 0, cudaStreamTailLaunch>>> (
+        idata, odata, istride
+      );
+    }
+	}
+}
+
+
+__global__ void gpuRecursiveReduce2(int *g_idata, int *g_odata, int isize, int const idim) {
+  const int last_block_idx = gridDim.x - 1;
+	unsigned int tid = threadIdx.x;
+	int *idata = g_idata + blockIdx.x * idim;
+
+	// stop condition
+	if (isize == 1 && tid == 0) {
+		g_odata[blockIdx.x] = idata[0] + idata[1];
+    return;
+	}
+
+  // Ok big issue:
+  // Accessing element block idx 2047 * idim 512 + tid 413 + isize 256 = 1,048,733 Value 0 + 8 =
+  // Accessing element block idx 2047 * idim 512 + tid 414 + isize 256 = 1,048,734 Value 0 + 124 =
+  // Accessing element block idx 2047 * idim 512 + tid 415 + isize 256 = 1,048,735 Value 0 + 195 =
+  // Accessing element block idx 2047 * idim 512 + tid 256 + isize 256 = 1,048,576 Value 0 + 151 =
+
+  // The idata pointer only has len 1,048,576. '1,048,733 Value 0 + 8 =' is UB no?
+  // Like... This "works" since its only ever summing real elements, but this is still... terrible?
+  // I think I want the final block to be a noop no?
+
+  // wtf given block size 512, and thread 511 + stride, what protects against this?
+  // I mean I guess as long as its not the last block? Because we are probably fine
+  // then. 
+
+  // Ok I hate the last block. We are relying on out-of-memory access being zero instead
+  // of weird ub
+
+  // Reading this more, how th fuck does this work? If I'm on block
+  // 2047
+  // and I'm starting from element: 2047 * 512
+  // and I have tid 511
+  // I'm going to be accessing element 2047 * 512 + 511 + 512 = 1,049,087
+  // where elements are 1,048,576.
+
+  // where stride is 8
+  // block 1, block 2, block 3
+  // [1, 1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1, 1]
+  // sum first batch of threads
+  // in place reduction
+
+  // A little safer, at least not accessing out of bounds, however we now
+  // maybe have warp divergence.
+  if (blockIdx.x != last_block_idx || tid + isize < idim) {
+    idata[tid] += idata[tid + isize];
+  }
+
+  if (tid == 0 && blockIdx.x == 0) {
+    gpuRecursiveReduce2 <<<gridDim.x, isize / 2, 0, cudaStreamTailLaunch>>> (
+      g_idata, g_odata, isize / 2, idim
+    );
+  }
+}
+
 
 void run_reduction_function(
 	void (*gpu_reducer_fn)(int*, int*, int),
@@ -213,6 +303,42 @@ void run_reduction_function(
 	cudaFree(d_odata);
 	free(h_odata);
 }
+
+
+void run_reduction_function(
+	void (*gpu_reducer_fn)(int*, int*, int, int const),
+	const char * function_name,
+	int *h_idata,
+	int *h_check_odata,
+	dim3 grid,
+	dim3 block,
+	int nx,
+	int reduction_size,
+	int kernel_x_denom=1,
+	int grid_x_denom=1
+) {
+	double iStart, iElips;
+	int input_size = nx * sizeof(int);
+	int output_size = (grid.x / grid_x_denom) * sizeof(int);
+	int *h_odata,*d_idata,*d_odata;
+	host_malloc((int**)&h_odata, output_size);
+	cudaMalloc((int**)&d_idata, input_size);
+	cudaMalloc((int**)&d_odata, output_size);
+	cudaMemcpy(d_idata, h_idata, input_size, cudaMemcpyHostToDevice);
+	iStart = cpuSecond();
+
+	gpu_reducer_fn<<< grid.x/kernel_x_denom, block>>> (d_idata, d_odata, reduction_size / 2, block.x);
+
+	CHECK(cudaDeviceSynchronize());
+	printElaps(iStart,iElips, function_name, grid, block);
+	cudaMemcpy(h_odata, d_odata, output_size, cudaMemcpyDeviceToHost);
+	hostAccumulateToIndex0(h_odata, grid.x/grid_x_denom);
+	checkResult(h_check_odata, h_odata, nx);
+	cudaFree(d_idata);
+	cudaFree(d_odata);
+	free(h_odata);
+}
+
 
 
 /**
@@ -262,26 +388,49 @@ int main(int argc, char **argv) {
   printElaps(iStart,iElips, "hostReduceNeighbored", grid, block);
 
   run_reduction_function(
-	reduceNeighbored,
-	"reduceNeighbored",
-	h_idata,
-	h_check_odata,
-	grid,
-	block,
-	nx,
-	nx
+  reduceNeighbored,
+  "reduceNeighbored",
+  h_idata,
+  h_check_odata,
+  grid,
+  block,
+  nx,
+  nx
   );
 
   run_reduction_function(
-	gpuRecursiveReduce,
-	"gpuRecursiveReduce",
-	h_idata,
-	h_check_odata,
-	grid,
-	block,
-	nx,
-	block.x
+  gpuRecursiveReduce,
+  "gpuRecursiveReduce",
+  h_idata,
+  h_check_odata,
+  grid,
+  block,
+  nx,
+  block.x
   );
+
+  run_reduction_function(
+  gpuRecursiveReduceNoSync,
+  "gpuRecursiveReduceNoSync",
+  h_idata,
+  h_check_odata,
+  grid,
+  block,
+  nx,
+  block.x
+  );
+
+  run_reduction_function(
+  gpuRecursiveReduce2,
+  "gpuRecursiveReduce2",
+  h_idata,
+  h_check_odata,
+  grid,
+  block,
+  nx,
+  block.x
+  );
+  printf("Creating pointers of %d elements.\n", nx);
 
 
   free(h_idata);
