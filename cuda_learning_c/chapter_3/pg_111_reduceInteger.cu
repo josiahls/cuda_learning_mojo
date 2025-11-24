@@ -246,18 +246,70 @@ __global__ void reduceUnrolling4(int *g_idata, int *g_odata, int n) {
 	unsigned int idx = block_start + threadIdx.x;
 	int *idata = g_idata + block_start;
   
+	// if (idx + blockDim.x * (unroll_factor - 1) < n) {
+	//   // Unroll 8 data blocks (4th being handled in the stride loop)
+	//   int a1 = g_idata[idx];
+	//   int a2 = g_idata[idx + blockDim.x];
+	//   int a3 = g_idata[idx + blockDim.x * 2];
+	//   int a4 = g_idata[idx + blockDim.x * 3];
+	//   int a5 = g_idata[idx + blockDim.x * 4];
+	//   int a6 = g_idata[idx + blockDim.x * 5];
+	//   int a7 = g_idata[idx + blockDim.x * 6];
+	//   int a8 = g_idata[idx + blockDim.x * 7];
+
+	//   g_idata[idx] = a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8;
+	  
+	// } 
+	int *ptr = g_idata + idx;
+	int tmp = 0;
+	for (int i = 0; i < 8; i++) {
+		tmp += *ptr;
+		ptr += blockDim.x;
+	}
+	g_idata[idx] = tmp;
+	__syncthreads();
+  
+	for (int stride=blockDim.x / 2; stride  > 0; stride >>= 1) {
+	  if (tid < stride) {
+		idata[tid] += idata[tid + stride];
+	  }
+  
+	  __syncthreads();
+	}
+  
+	if (tid == 0) g_odata[blockIdx.x] = idata[0];
+  }
+
+
+
+  __global__ void reduceUnrolling16(int *g_idata, int *g_odata, int n) {
+	unsigned int tid = threadIdx.x;
+	const unsigned int unroll_factor = 16;
+	// We are accessing 2 blocks per thread
+	unsigned int block_start = blockIdx.x * blockDim.x * unroll_factor;
+	unsigned int idx = block_start + threadIdx.x;
+	int *idata = g_idata + block_start;
+  
 	if (idx + blockDim.x * (unroll_factor - 1) < n) {
 	  // Unroll 8 data blocks (4th being handled in the stride loop)
 	  int a1 = g_idata[idx];
-	  int a2 = g_idata[idx + blockDim.x];
-	  int a3 = g_idata[idx + blockDim.x * 2];
-	  int a4 = g_idata[idx + blockDim.x * 3];
-	  int a5 = g_idata[idx + blockDim.x * 4];
-	  int a6 = g_idata[idx + blockDim.x * 5];
-	  int a7 = g_idata[idx + blockDim.x * 6];
-	  int a8 = g_idata[idx + blockDim.x * 7];
+		int a2 = g_idata[idx + blockDim.x];
+		int a3 = g_idata[idx + blockDim.x * 2];
+		int a4 = g_idata[idx + blockDim.x * 3];
+		int a5 = g_idata[idx + blockDim.x * 4];
+		int a6 = g_idata[idx + blockDim.x * 5];
+		int a7 = g_idata[idx + blockDim.x * 6];
+		int a8 = g_idata[idx + blockDim.x * 7];
+		int a9 = g_idata[idx + blockDim.x * 8];
+		int a10 = g_idata[idx + blockDim.x * 9];
+		int a11 = g_idata[idx + blockDim.x * 10];
+		int a12 = g_idata[idx + blockDim.x * 11];
+		int a13 = g_idata[idx + blockDim.x * 12];
+		int a14 = g_idata[idx + blockDim.x * 13];
+		int a15 = g_idata[idx + blockDim.x * 14];
+		int a16 = g_idata[idx + blockDim.x * 15];
 
-	  g_idata[idx] = a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8;
+	  g_idata[idx] = a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10 + a11 + a12 + a13 + a14 + a15 + a16;
 	  
 	} 
 	__syncthreads();
@@ -312,14 +364,30 @@ __global__ void reduceUnrolling8UnrollLastWarp(int *g_idata, int *g_odata, int n
 		// Note manually unrolls the final strides of the above for loop.
 		// Note: Removing volatile doesn't effect this, but likely because
 		// this is otherwise nondeterministic.
-		volatile int *vmem = idata;// If all values are 10
+		// volatile int *vmem = idata;// If all values are 10
+		// //                            vmem[idx] == 10
+		// vmem[tid] += vmem[tid + 32];//vmem[idx] == 20
+		// vmem[tid] += vmem[tid + 16];//vmem[idx] == 30
+		// vmem[tid] += vmem[tid +  8];//vmem[idx] == 40
+		// vmem[tid] += vmem[tid +  4];//vmem[idx] == 50
+		// vmem[tid] += vmem[tid +  2];//vmem[idx] == 60
+		// vmem[tid] += vmem[tid +  1];//vmem[idx] == 70
+		
+		int *vmem = idata;// If all values are 10
 		//                            vmem[idx] == 10
+		__syncthreads();
 		vmem[tid] += vmem[tid + 32];//vmem[idx] == 20
+		__syncthreads();
 		vmem[tid] += vmem[tid + 16];//vmem[idx] == 30
+		__syncthreads();
 		vmem[tid] += vmem[tid +  8];//vmem[idx] == 40
+		__syncthreads();
 		vmem[tid] += vmem[tid +  4];//vmem[idx] == 50
+		__syncthreads();
 		vmem[tid] += vmem[tid +  2];//vmem[idx] == 60
+		__syncthreads();
 		vmem[tid] += vmem[tid +  1];//vmem[idx] == 70
+		__syncthreads();
 	}
 
 	if (tid == 0) g_odata[blockIdx.x] = idata[0];
@@ -620,6 +688,18 @@ int main(int argc, char **argv) {
 	nx,
 	8,
 	8
+  );
+
+  run_reduction_function(
+	reduceUnrolling16,
+	"reduceUnrolling16",
+	h_idata,
+	h_check_odata,
+	grid,
+	block,
+	nx,
+	16,
+	16
   );
 
   run_reduction_function(
